@@ -8,6 +8,8 @@ Endpoints
     PUT   /api/config        replace configuration (saved; restarts if streaming)
     POST  /api/control       {"action": "start" | "stop" | "restart" | "play" | "pause" | "next" | "prev" | "sync_test"}
     PATCH /api/speaker       {"match": ..., "volume"?, "muted"?, "delay_ms"?}
+    GET   /api/setup         state of the Spotify client setup (receiver "headless")
+    POST  /api/setup         {"action": "start" | "stop"}: the one-time sign-in session
 
 Mutating requests must send Content-Type: application/json. Browsers cannot send
 that cross-site without a CORS preflight, which this server never grants, so
@@ -129,6 +131,8 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
                 return self._dispatch(self._get_outputs)
             if path == "/api/config":
                 return self._dispatch(lambda: self._json(200, config_to_dict(engine.config)))
+            if path == "/api/setup":
+                return self._dispatch(lambda: self._json(200, engine.setup_status()))
             self._error(404, "not found")
 
         def _mutate(self, path: str, handler) -> None:
@@ -142,7 +146,11 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
             self._mutate("/api/config", self._put_config)
 
         def do_POST(self) -> None:  # noqa: N802
-            self._mutate("/api/control", self._control)
+            path = self.path.split("?", 1)[0]
+            if path == "/api/setup":
+                self._mutate(path, self._setup)
+            else:  # anything else is answered by _mutate: /api/control, or a 404
+                self._mutate("/api/control", self._control)
 
         def do_PATCH(self) -> None:  # noqa: N802
             self._mutate("/api/speaker", self._patch_speaker)
@@ -182,6 +190,16 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
                     "action must be start, stop, restart, play, pause, next, prev or sync_test"
                 )
             self._json(200, {"status": engine.status()})
+
+        def _setup(self) -> None:
+            action = self._read_json().get("action")
+            if action == "start":
+                engine.setup_start()
+            elif action == "stop":
+                engine.setup_stop()
+            else:
+                raise _BadRequest("action must be start or stop")
+            self._json(200, {"setup": engine.setup_status(), "status": engine.status()})
 
         def _patch_speaker(self) -> None:
             data = self._read_json()

@@ -1,7 +1,6 @@
 {
   "device_name": "Bluetooth Splitter",
-  "receiver": "builtin",
-  "bitrate": 320,
+  "receiver": "soloist",
   "buffer_seconds": 2.0,
   "auto_latency_compensation": true,
   "autostart": true,

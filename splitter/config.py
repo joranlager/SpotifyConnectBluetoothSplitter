@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -12,13 +13,16 @@ SAMPLE_RATE = 44100
 CHANNELS = 2
 SAMPLE_WIDTH = 2  # bytes per sample, S16LE
 BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH
-VALID_BITRATES = (96, 160, 320)
-# "builtin":   the pure-Python receiver in this repo (spconnect). Spotify may refuse
-#              to hand it the audio keys on some accounts.
-# "soloist":   Spotify's official headless client. It plays on the Windows default
-#              output and we capture that with WASAPI loopback.
-# "librespot": an external librespot executable writing PCM to stdout.
-VALID_RECEIVERS = ("builtin", "soloist", "librespot")
+# Only Spotify's own clients are supported; nothing here speaks Spotify's protocol or
+# touches its DRM, we only route the sound the official client plays.
+# "soloist":   Spotify's official headless client (Soloist). It plays on the Windows
+#              default output and we capture that with WASAPI loopback.
+# "headless":  the official Spotify desktop client, run headless on Linux by the
+#              `spotify-headless` Rust tool (headless/), which writes PCM to stdout.
+VALID_RECEIVERS = ("soloist", "headless")
+DEFAULT_RECEIVER = "headless" if sys.platform.startswith("linux") else "soloist"
+# Receivers that earlier versions offered. They are no longer supported.
+REMOVED_RECEIVERS = ("builtin", "librespot")
 
 
 def bytes_per_second(sample_rate: int) -> int:
@@ -37,16 +41,21 @@ class SpeakerConfig:
 @dataclass
 class AppConfig:
     device_name: str = "Bluetooth Splitter"
-    receiver: str = "builtin"
-    librespot_path: str = "librespot"  # only used when receiver is "librespot"
-    librespot_args: list[str] = field(default_factory=list)
+    receiver: str = DEFAULT_RECEIVER
     soloist_path: str = "soloist"  # executable; also searched in ./tools/soloist next to the config
     soloist_args: list[str] = field(default_factory=list)  # extra Soloist command-line flags
     # File holding the Soloist API key. The SOLOIST_API_KEY environment variable wins
     # over it. The key is a credential: it is never stored in this config.
     soloist_api_key_file: str = ".soloist-api-key"
-    bitrate: int = 320
-    cache_dir: str | None = None
+    # receiver "headless": the spotify-headless tool (also searched in ./tools/spotify-headless
+    # and ./headless/target/release next to the config) and the official Spotify client it runs.
+    headless_path: str = "spotify-headless"
+    headless_args: list[str] = field(default_factory=list)  # extra flags for spotify-headless
+    spotify_bin: str = "spotify"  # the official client's executable
+    # Folder for the client's config (the saved login), cache and logs. Default:
+    # ".spotify-headless-data" next to the config file. It holds a login: keep it private.
+    headless_data_dir: str | None = None
+    headless_vnc_port: int = 5900  # loopback VNC port of the one-time setup session
     buffer_seconds: float = 2.0
     auto_latency_compensation: bool = True
     autostart: bool = True  # start streaming when the app launches
@@ -64,15 +73,16 @@ def parse_config(data: dict) -> AppConfig:
     _require(isinstance(data, dict), "config must be a JSON object")
     cfg = AppConfig(
         device_name=str(data.get("device_name", "Bluetooth Splitter")).strip() or "Bluetooth Splitter",
-        receiver=str(data.get("receiver", "builtin")),
-        librespot_path=str(data.get("librespot_path", "librespot")),
-        librespot_args=[str(a) for a in data.get("librespot_args", [])],
+        receiver=str(data.get("receiver", DEFAULT_RECEIVER)),
         soloist_path=str(data.get("soloist_path", "soloist")).strip() or "soloist",
         soloist_args=[str(a) for a in data.get("soloist_args", [])],
         soloist_api_key_file=str(data.get("soloist_api_key_file", ".soloist-api-key")).strip()
         or ".soloist-api-key",
-        bitrate=int(data.get("bitrate", 320)),
-        cache_dir=data.get("cache_dir") or None,
+        headless_path=str(data.get("headless_path", "spotify-headless")).strip() or "spotify-headless",
+        headless_args=[str(a) for a in data.get("headless_args", [])],
+        spotify_bin=str(data.get("spotify_bin", "spotify")).strip() or "spotify",
+        headless_data_dir=(str(data.get("headless_data_dir") or "").strip() or None),
+        headless_vnc_port=int(data.get("headless_vnc_port", 5900)),
         buffer_seconds=float(data.get("buffer_seconds", 2.0)),
         auto_latency_compensation=bool(data.get("auto_latency_compensation", True)),
         autostart=bool(data.get("autostart", True)),
@@ -80,10 +90,14 @@ def parse_config(data: dict) -> AppConfig:
         web_port=int(data.get("web_port", 8080)),
         speakers=[],
     )
+    _require(
+        cfg.receiver not in REMOVED_RECEIVERS,
+        f"receiver {cfg.receiver!r} is no longer supported; use one of {VALID_RECEIVERS} (Spotify's own clients)",
+    )
     _require(cfg.receiver in VALID_RECEIVERS, f"receiver must be one of {VALID_RECEIVERS}")
-    _require(cfg.bitrate in VALID_BITRATES, f"bitrate must be one of {VALID_BITRATES}")
     _require(0.2 <= cfg.buffer_seconds <= 30, "buffer_seconds must be between 0.2 and 30")
     _require(1 <= cfg.web_port <= 65535, "web_port must be between 1 and 65535")
+    _require(1 <= cfg.headless_vnc_port <= 65535, "headless_vnc_port must be between 1 and 65535")
     seen: set[str] = set()
     for item in data.get("speakers", []):
         match = str(item.get("match", "")).strip()

@@ -290,6 +290,24 @@
   details.advanced[open] summary::after { transform: rotate(270deg); }
   details.advanced[open] summary { border-bottom: 1px solid var(--separator); }
 
+  /* ----- Spotify client setup ----- */
+  .checks { display: grid; gap: 10px; margin-bottom: 14px; }
+  .check { display: flex; gap: 10px; align-items: baseline; font-size: 14px; }
+  .check .mark { width: 18px; text-align: center; flex: none; font-weight: 700; }
+  .check .mark.ok { color: var(--green); }
+  .check .mark.bad { color: var(--red); }
+  .check .mark.unk { color: var(--tertiary); }
+  .check small { display: block; color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
+  .guide { background: var(--bg); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; font-size: 14px; }
+  .guide ol { margin: 0; padding-left: 20px; }
+  .guide li { margin: 8px 0; }
+  .code {
+    display: block; margin-top: 4px; padding: 6px 10px; border-radius: 8px; background: var(--fill);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+    overflow-x: auto; white-space: pre; user-select: all;
+  }
+  .setup-note { color: var(--secondary); font-size: 12px; margin: 12px 0 0; }
+
   .outputs { display: grid; gap: 8px; }
   .output { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--bg); }
   .output .k { flex: 1; min-width: 0; }
@@ -433,12 +451,6 @@
       <input type="text" id="f_device_name" maxlength="60" autocomplete="off">
     </div>
     <div class="item">
-      <div class="k">Audio quality<small>Spotify streaming bitrate</small></div>
-      <div class="seg" id="f_bitrate">
-        <button data-v="96">96</button><button data-v="160">160</button><button data-v="320">320</button>
-      </div>
-    </div>
-    <div class="item">
       <div class="k">Buffer<small>More buffer survives Wi-Fi hiccups but adds delay</small></div>
       <input type="range" id="f_buffer_seconds" min="0.5" max="10" step="0.5">
       <span class="val" id="f_buffer_val">2.0 s</span>
@@ -454,22 +466,30 @@
     <details class="advanced">
       <summary>Advanced</summary>
       <div class="item">
-        <div class="k">Spotify receiver<small>Soloist is Spotify’s official client; the sound is captured from this PC’s default output</small></div>
+        <div class="k">Spotify receiver<small>Spotify client = the official desktop client, run headless on Linux (see “Spotify client setup” below). Soloist is Spotify’s official headless client; its sound is captured from this PC’s default output</small></div>
         <div class="seg" id="f_receiver">
-          <button data-v="soloist">Soloist</button><button data-v="builtin">Built-in</button><button data-v="librespot">librespot</button>
+          <button data-v="headless">Spotify client</button><button data-v="soloist">Soloist</button>
         </div>
+      </div>
+      <div class="item headless-only">
+        <div class="k">Spotify client<small>The official Spotify executable (Linux)</small></div>
+        <input type="text" id="f_spotify_bin" autocomplete="off" placeholder="spotify">
+      </div>
+      <div class="item headless-only">
+        <div class="k">spotify-headless path<small>The Rust tool in headless/. Also looked for in headless/target/release next to the config</small></div>
+        <input type="text" id="f_headless_path" autocomplete="off" placeholder="spotify-headless">
+      </div>
+      <div class="item headless-only">
+        <div class="k">Client data folder<small>Holds the client’s saved login. Default: .spotify-headless-data next to the config</small></div>
+        <input type="text" id="f_headless_data_dir" autocomplete="off" placeholder="(default)">
+      </div>
+      <div class="item headless-only">
+        <div class="k">Setup VNC port<small>Loopback-only port of the one-time sign-in session</small></div>
+        <input type="number" id="f_headless_vnc_port" min="1" max="65535">
       </div>
       <div class="item soloist-only">
         <div class="k">Soloist path<small>Looked for in tools/soloist next to the config; API key from SOLOIST_API_KEY or .soloist-api-key</small></div>
         <input type="text" id="f_soloist_path" autocomplete="off" placeholder="soloist">
-      </div>
-      <div class="item librespot-only">
-        <div class="k">librespot path<small>External librespot executable</small></div>
-        <input type="text" id="f_librespot_path" autocomplete="off" placeholder="librespot">
-      </div>
-      <div class="item librespot-only">
-        <div class="k">Credential cache<small>librespot’s cache folder</small></div>
-        <input type="text" id="f_cache_dir" autocomplete="off" placeholder="(none)">
       </div>
       <div class="item">
         <div class="k">Web address<small>Use 0.0.0.0 to allow other devices (no login)</small></div>
@@ -480,6 +500,18 @@
         <input type="number" id="f_web_port" min="1" max="65535">
       </div>
     </details>
+  </div>
+
+  <!-- Spotify client setup (receiver "headless") -->
+  <div id="setupSection" class="hidden">
+    <div class="section-title"><span>Spotify client setup</span></div>
+    <div class="card">
+      <div class="checks" id="setupChecks"></div>
+      <div id="setupGuide" class="guide hidden"></div>
+      <p class="note hidden" id="setupError"></p>
+      <button class="btn" id="setupBtn" disabled>Start setup</button>
+      <p class="setup-note">The official client has to be signed in once. Setup starts it on a virtual display with a VNC server (this machine only) so you can sign in. The login is saved in the client data folder, so you will not need setup again. In Spotify, the device appears under this computer’s host name, not under the Device name above.</p>
+    </div>
   </div>
 
   <footer>Bluetooth Splitter · Changes to devices and quality apply when streaming restarts.</footer>
@@ -645,6 +677,8 @@
       hint.textContent = `Signed in as ${sp.username}. Choose “${s.device_name}” in Spotify to play.`;
     } else if (sp.state === "active") {
       hint.textContent = sp.username ? `Playing from ${sp.username}’s Spotify` : "Playing";
+    } else if (s.receiver === "headless") {
+      hint.textContent = "In Spotify, choose this computer (listed under its host name) as the device";
     } else {
       hint.textContent = `Open Spotify on this network and choose “${s.device_name}” as the device`;
     }
@@ -912,14 +946,15 @@
     buffer_seconds: $("#f_buffer_seconds"),
     auto_latency_compensation: $("#f_auto_latency"),
     autostart: $("#f_autostart"),
-    librespot_path: $("#f_librespot_path"),
     soloist_path: $("#f_soloist_path"),
-    cache_dir: $("#f_cache_dir"),
+    spotify_bin: $("#f_spotify_bin"),
+    headless_path: $("#f_headless_path"),
+    headless_data_dir: $("#f_headless_data_dir"),
+    headless_vnc_port: $("#f_headless_vnc_port"),
     web_host: $("#f_web_host"),
     web_port: $("#f_web_port"),
   };
-  let bitrate = 320;
-  let receiver = "builtin";
+  let receiver = "soloist";
 
   function fillForm(cfg) {
     F.device_name.value = cfg.device_name;
@@ -928,40 +963,37 @@
     F.buffer_seconds.style.setProperty("--p", ((cfg.buffer_seconds - 0.5) / 9.5 * 100) + "%");
     F.auto_latency_compensation.checked = cfg.auto_latency_compensation;
     F.autostart.checked = cfg.autostart;
-    F.librespot_path.value = cfg.librespot_path || "";
     F.soloist_path.value = cfg.soloist_path || "";
-    F.cache_dir.value = cfg.cache_dir || "";
+    F.spotify_bin.value = cfg.spotify_bin || "";
+    F.headless_path.value = cfg.headless_path || "";
+    F.headless_data_dir.value = cfg.headless_data_dir || "";
+    F.headless_vnc_port.value = cfg.headless_vnc_port || 5900;
     F.web_host.value = cfg.web_host || "";
     F.web_port.value = cfg.web_port || 8080;
-    bitrate = cfg.bitrate;
-    setSeg(bitrate);
-    receiver = cfg.receiver || "builtin";
+    receiver = cfg.receiver || "soloist";
     setReceiver(receiver);
     setDirty(false);
   }
 
-  function setSeg(v) {
-    document.querySelectorAll("#f_bitrate button").forEach((b) => b.classList.toggle("active", Number(b.dataset.v) === Number(v)));
-  }
-
   function setReceiver(v) {
     document.querySelectorAll("#f_receiver button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
-    document.querySelectorAll(".librespot-only").forEach((el) => el.classList.toggle("hidden", v !== "librespot"));
     document.querySelectorAll(".soloist-only").forEach((el) => el.classList.toggle("hidden", v !== "soloist"));
+    document.querySelectorAll(".headless-only").forEach((el) => el.classList.toggle("hidden", v !== "headless"));
   }
 
   function readForm() {
     return {
       ...config,
       device_name: F.device_name.value.trim() || "Bluetooth Splitter",
-      bitrate,
       receiver,
       buffer_seconds: Number(F.buffer_seconds.value),
       auto_latency_compensation: F.auto_latency_compensation.checked,
       autostart: F.autostart.checked,
-      librespot_path: F.librespot_path.value.trim() || "librespot",
       soloist_path: F.soloist_path.value.trim() || "soloist",
-      cache_dir: F.cache_dir.value.trim() || null,
+      spotify_bin: F.spotify_bin.value.trim() || "spotify",
+      headless_path: F.headless_path.value.trim() || "spotify-headless",
+      headless_data_dir: F.headless_data_dir.value.trim() || null,
+      headless_vnc_port: Number(F.headless_vnc_port.value) || 5900,
       web_host: F.web_host.value.trim() || "127.0.0.1",
       web_port: Number(F.web_port.value) || 8080,
       // Use live speaker values so a stale copy never overwrites a newer volume.
@@ -982,11 +1014,6 @@
     setDirty(true);
   }));
   Object.values(F).forEach((el) => el.addEventListener("change", () => setDirty(true)));
-  document.querySelectorAll("#f_bitrate button").forEach((b) => b.addEventListener("click", () => {
-    bitrate = Number(b.dataset.v);
-    setSeg(bitrate);
-    setDirty(true);
-  }));
   document.querySelectorAll("#f_receiver button").forEach((b) => b.addEventListener("click", () => {
     receiver = b.dataset.v;
     setReceiver(receiver);
@@ -1000,6 +1027,8 @@
       status = res.status;
       fillForm(config);
       renderAll(true);
+      renderSetup();
+      pollSetup();
       toast(okMsg);
     } catch (err) {
       toast(err.message, true);
@@ -1008,6 +1037,86 @@
 
   $("#saveBtn").addEventListener("click", () => saveConfig(readForm()));
   $("#discardBtn").addEventListener("click", () => fillForm(config));
+
+  // ---------- Spotify client setup (receiver "headless") ----------
+  let setup = null;
+  let setupPolling = false;
+
+  function checkRow(state, label, detail) {
+    const mark = state === true ? ["ok", "✓"] : state === false ? ["bad", "✕"] : ["unk", "•"];
+    return `<div class="check"><span class="mark ${mark[0]}">${mark[1]}</span><div>${esc(label)}${detail ? `<small>${esc(detail)}</small>` : ""}</div></div>`;
+  }
+
+  function setupGuideHTML(port) {
+    const host = location.hostname;
+    const local = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+    const connect = local
+      ? `<li>Open a VNC viewer and connect to <span class="code">localhost:${esc(port)}</span></li>`
+      : `<li>On your own computer, open an SSH tunnel to this machine:<span class="code">ssh -L ${esc(port)}:127.0.0.1:${esc(port)} USER@${esc(host)}</span>
+         then connect a VNC viewer to <span class="code">localhost:${esc(port)}</span></li>`;
+    return `<ol>
+      ${connect}
+      <li>Sign in to Spotify in the window you see. If your account has no password (you normally use Google, Facebook or Apple), set one on spotify.com first: the client’s browser sign-in cannot open on a machine without a browser.</li>
+      <li>When you are signed in, press <b>Finish setup</b>, then press <b>Start</b> at the top.</li>
+    </ol>`;
+  }
+
+  function renderSetup() {
+    const section = $("#setupSection");
+    const show = !!config && config.receiver === "headless";
+    section.classList.toggle("hidden", !show);
+    if (!show || !setup) return;
+    $("#setupChecks").innerHTML = [
+      checkRow(setup.supported, "Running on Linux", setup.supported ? "" : "The Spotify client receiver only runs on Linux."),
+      checkRow(!!setup.tool_path, "spotify-headless tool", setup.tool_path || "Not found. Build it with “cargo build --release” in the headless folder, or set its path under Advanced."),
+      checkRow(setup.spotify_found, "Spotify desktop client", setup.spotify_found ? "" : "Not found. Install Spotify, or set its path under Advanced."),
+      checkRow(setup.login_data_found ? true : null, "Saved Spotify login",
+        setup.login_data_found ? "Found in the client data folder." : "None found yet. Run the setup and sign in. (This check is a best guess.)"),
+    ].join("");
+    const guide = $("#setupGuide");
+    guide.classList.toggle("hidden", !setup.running);
+    if (setup.running) guide.innerHTML = setupGuideHTML(setup.vnc_port);
+    const err = $("#setupError");
+    err.classList.toggle("hidden", !setup.error);
+    err.textContent = setup.error || "";
+    const btn = $("#setupBtn");
+    const streaming = status && status.state === "running";
+    btn.dataset.action = setup.running ? "stop" : "start";
+    btn.textContent = setup.running ? "Finish setup" : "Start setup";
+    btn.className = setup.running ? "btn danger" : "btn";
+    btn.disabled = !setup.running && (streaming || !setup.supported);
+    btn.title = !setup.running && streaming ? "Stop the splitter first" : "";
+  }
+
+  async function pollSetup() {
+    if (setupPolling) return;
+    setupPolling = true;
+    try {
+      setup = await api("GET", "/api/setup");
+      renderSetup();
+    } catch (err) {
+      console.warn("setup poll failed:", err);
+    } finally {
+      setupPolling = false;
+    }
+  }
+
+  $("#setupBtn").addEventListener("click", async () => {
+    const action = $("#setupBtn").dataset.action || "start";
+    $("#setupBtn").disabled = true;
+    try {
+      const res = await api("POST", "/api/setup", { action });
+      setup = res.setup;
+      status = res.status;
+      renderAll(true);
+      toast(action === "start" ? "Setup started" : "Setup finished");
+    } catch (err) {
+      toast(err.message, true);
+      pollSetup();
+    } finally {
+      renderSetup();
+    }
+  });
 
   // ---------- controls ----------
   $("#toggleBtn").addEventListener("click", async () => {
@@ -1092,6 +1201,7 @@
     } catch (err) {
       console.error("render failed:", err);
     }
+    if (config && config.receiver === "headless") pollSetup();
   }
 
   async function init() {

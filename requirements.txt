@@ -1,9 +1,2 @@
 sounddevice>=0.4.6
 numpy>=1.26
-soundfile>=0.12.1
-cryptography>=42
-protobuf>=7.36.2
-requests>=2.31
-websocket-client>=1.7
-zeroconf>=0.132
-ifaddr>=0.2

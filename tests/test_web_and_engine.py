@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from splitter.app import Engine
-from splitter.config import load_config, parse_config, save_config
+from splitter.config import DEFAULT_RECEIVER, load_config, parse_config, save_config
 from splitter.web import make_handler
 
 
@@ -106,16 +106,16 @@ def test_put_config_validates_and_saves(server):
     base, _, cfg_path = server
     cfg = json.loads(_req(base, "GET", "/api/config")[1])
     cfg["device_name"] = "Living Room"
-    cfg["bitrate"] = 160
+    cfg["buffer_seconds"] = 5.0
     code, body, _ = _req(base, "PUT", "/api/config", cfg)
     assert code == 200
     assert load_config(cfg_path).device_name == "Living Room"
 
-    cfg["bitrate"] = 999
+    cfg["buffer_seconds"] = 999
     code, body, _ = _req(base, "PUT", "/api/config", cfg)
     assert code == 400
-    assert "bitrate" in json.loads(body)["error"]
-    assert load_config(cfg_path).bitrate == 160
+    assert "buffer_seconds" in json.loads(body)["error"]
+    assert load_config(cfg_path).buffer_seconds == 5.0
 
 
 def test_put_config_rejects_duplicate_speakers(server):
@@ -180,7 +180,7 @@ def test_transport_control_without_a_session_is_a_clean_error(server):
 def test_status_names_the_receiver(server):
     base, *_ = server
     status = json.loads(_req(base, "GET", "/api/status")[1])
-    assert status["receiver"] == "builtin"
+    assert status["receiver"] == DEFAULT_RECEIVER
     assert status["spotify"] is None
 
 
