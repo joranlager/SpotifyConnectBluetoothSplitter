@@ -577,3 +577,34 @@ def test_status_snapshot(rig):
     assert status["state"] == "active" and status["playing"] is True
     assert status["track"]["name"] == "Song"
     assert status["context_uri"] == PLAYLIST
+
+
+def test_refused_audio_keys_stop_playback_quickly_with_a_clear_message(rig):
+    rig.play_playlist()
+    refusal = "no audio key for x: access point refused the audio key (code 0001)"
+    for n in range(2):
+        rig.event("unavailable", uri=rig.state.current_uri, reason=refusal)
+        assert rig.r._play_status.kind != "stopped", f"gave up after only {n + 1} refusals"
+    skipped_to = len(rig.player.loads())
+    rig.event("unavailable", uri=rig.state.current_uri, reason=refusal)
+    assert rig.r._play_status.kind == "stopped"
+    assert len(rig.player.loads()) == skipped_to  # no further tracks were tried
+    assert "refused" in rig.r.status()["error"]
+
+
+def test_ordinary_unavailable_tracks_are_still_skipped_past(rig):
+    rig.play_playlist()
+    for _ in range(5):
+        rig.event("unavailable", uri=rig.state.current_uri, reason="restricted in your country")
+    assert rig.r._play_status.kind != "stopped"
+    assert rig.state.current_uri == uri(5)
+
+
+def test_a_loaded_track_resets_the_refusal_count(rig):
+    rig.play_playlist()
+    refusal = "access point refused the audio key (code 0001)"
+    rig.event("unavailable", uri=rig.state.current_uri, reason=refusal)
+    rig.event("unavailable", uri=rig.state.current_uri, reason=refusal)
+    rig.started()
+    rig.event("unavailable", uri=rig.state.current_uri, reason=refusal)
+    assert rig.r._play_status.kind != "stopped"

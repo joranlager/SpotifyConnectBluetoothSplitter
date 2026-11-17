@@ -7,4 +7,7 @@ config.json
 # saved Spotify login of the built-in receiver (a credential: never commit)
 .spconnect-state.json
 .spconnect-state.json.tmp
+# Soloist API key and data (credentials: never commit)
+.soloist-api-key
+.soloist-data/
 tools/

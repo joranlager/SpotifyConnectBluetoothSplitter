@@ -3,7 +3,18 @@
 A Python app that makes your PC a **Spotify Connect** device and plays the
 same music on **several Bluetooth speakers at once**.
 
-It has two parts:
+It has three ways to receive Spotify (set `receiver` in the config):
+
+- **`soloist`** — Spotify's official headless Connect client. Works on every
+  Premium account. The app runs it, listens to what it plays on this PC and
+  sends that to your speakers. See [Using Soloist](#using-soloist).
+- **`builtin`** — a Spotify Connect receiver written in Python (`spconnect/`).
+  No extra install, but Spotify refuses it the audio keys on some accounts.
+- **`librespot`** — an external librespot program.
+
+The app itself (`splitter/`) copies the audio to one buffer per speaker, keeps
+the speakers aligned, and serves a web UI to control it. The built-in receiver
+is:
 
 - **`spconnect/`** — a Spotify Connect receiver written in Python. It appears in
   Spotify's device list, takes play/pause/skip/seek/queue/volume commands, and
@@ -32,6 +43,82 @@ python -m venv .venv
 pip install -r requirements.txt
 copy config.example.json config.json
 ```
+
+## Using Soloist
+
+[Soloist](https://developer.spotify.com/documentation/soloist/tutorials/getting-started)
+is Spotify's own headless Connect client. It plays on the Windows default
+output; the app captures that with WASAPI loopback and sends it to the
+speakers. Nothing is decrypted by this app: Spotify's client does the playback
+and we route the sound, like any mixer app.
+
+### 1. Get your Soloist API key
+
+You need a **Spotify Premium** account. The key is tied to that account, and
+Spotify says to keep it private and not share it. Soloist sends it to Spotify
+when someone selects the device.
+
+1. Go to the Spotify for Developers dashboard,
+   <https://developer.spotify.com/dashboard>, and log in with your Spotify account.
+2. Open the Soloist API Key page: <https://developer.spotify.com/dashboard/soloist>.
+3. If you are asked, read and accept the
+   [Spotify Terms and Conditions of Use](https://www.spotify.com/legal/end-user-agreement/).
+4. Generate an API key. Spotify's documentation does not name the button, so
+   follow what the page shows.
+5. Copy the key and store it **in one of these two places** (the app checks them
+   in this order):
+   - the `SOLOIST_API_KEY` environment variable. In PowerShell, for the current
+     window only: `$env:SOLOIST_API_KEY = "<your key>"`; or
+   - a plain text file named `.soloist-api-key` next to `config.json`, holding
+     only the key. Git ignores this file.
+
+   Do not put the key in `config.json`, in a chat, in an issue or in a commit.
+   If it leaks, generate a new one on the same page and replace it.
+
+The source of these steps is Spotify's
+[Getting started with Spotify Soloist](https://developer.spotify.com/documentation/soloist/tutorials/getting-started).
+
+### 2. Get Soloist
+
+Download the Windows build from Spotify's
+[Downloads and updates](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates)
+page. The file is `soloist_release_windows_x86_64.zip`. Spotify asks that you
+link to that page instead of passing the file on, so it is not part of this
+repository.
+
+1. Extract the zip. It contains `soloist.exe`.
+2. Put `soloist.exe` in `tools\soloist\` next to `config.json` (git ignores
+   `tools\`), or set `soloist_path` to its location.
+3. Check it runs: `tools\soloist\soloist.exe --version`.
+
+Builds **expire 90 days** after their build date and then exit with code 10.
+`--version` shows the build date. When it expires, download a newer build and
+replace `soloist.exe`; the app tells you in the web UI when this happens.
+
+### 3. Turn it on
+
+1. In `config.json` set `"receiver": "soloist"` (or pick **Soloist** under
+   *Advanced* in the web UI and save).
+2. Start the app and press **Start**. The first time, Windows Firewall may ask
+   whether `soloist.exe` may accept connections: allow it on private networks,
+   or Spotify cannot find the device.
+3. In the Spotify app on a phone or PC on the same network, open the device
+   picker and choose **Bluetooth Splitter** (your `device_name`).
+
+If it does not work, the web UI shows the reason (missing key, missing
+`soloist.exe`, expired build). Soloist's own log is `.soloist-data\soloist.log`.
+
+### 4. Keep the default output free
+
+**The Windows default output must not be one of your speakers.** Soloist plays
+on the default output and the app listens to it, so a speaker that is also the
+default output would echo. The app skips such a speaker and says so. Pick
+another default output in Windows Sound settings, or set only Soloist's output
+under *Settings › System › Sound › Volume mixer*. When a Bluetooth speaker
+connects, Windows may make it the default, so check this after connecting.
+
+The capture runs at the default output's sample rate (often 48 kHz) and the
+app follows it.
 
 ## Run
 
@@ -89,7 +176,9 @@ Requests that change state must send `Content-Type: application/json`.
 | Key | Meaning |
 | --- | --- |
 | `device_name` | Name shown in Spotify's device list |
-| `receiver` | `builtin` (default, the Python receiver) or `librespot` (external program) |
+| `receiver` | `soloist`, `builtin` (the Python receiver) or `librespot` (external program) |
+| `soloist_path` | Soloist executable (also looked for in `tools/soloist`); `soloist_args` adds flags |
+| `soloist_api_key_file` | File holding the Soloist API key (default `.soloist-api-key`); `SOLOIST_API_KEY` wins |
 | `bitrate` | 96, 160 or 320 kbit/s |
 | `buffer_seconds` | Largest per-speaker buffer before old audio is dropped |
 | `auto_latency_compensation` | Delays faster speakers so all speakers line up |
@@ -101,12 +190,17 @@ Requests that change state must send `Content-Type: application/json`.
 | `speakers[].muted` | Mute state, set live from the UI |
 | `librespot_path`, `librespot_args`, `cache_dir` | Only for `receiver: "librespot"` |
 
+Settings that are credentials (the Soloist key, the saved Spotify login) are never
+stored in `config.json`.
+
 ## How the sync works
 
-- All speakers receive identical PCM (16-bit, 44.1 kHz, stereo).
+- All speakers receive identical PCM (16-bit stereo; 44.1 kHz from the built-in
+  receiver and librespot, the default output's rate with Soloist).
 - Each speaker's output runs on its own realtime stream fed from its own buffer.
-- The receiver decodes only as fast as the speakers consume, keeping about a
-  quarter of a second queued, so the stream cannot drift away from the outputs.
+- The built-in receiver decodes only as fast as the speakers consume, keeping
+  about a quarter of a second queued, so the stream cannot drift away from the
+  outputs. With Soloist, the sound arrives in real time from the capture.
 - Bluetooth latency differs per speaker. With `auto_latency_compensation`, the
   app reads each stream's reported latency and gives the faster speakers a head
   of silence. That lead is restored after every pause, seek and track change.
@@ -147,6 +241,15 @@ See [spconnect/NOTICE.md](spconnect/NOTICE.md) for the origin of the protocol
 definitions and the licence of the code this is derived from.
 
 ## Known limitations
+
+- **The built-in receiver can be refused.** Spotify has started withholding audio
+  keys from the older access method that open-source players use, for some
+  accounts (it wants its PlayPlay DRM). The log then shows
+  `access point refused the audio key`. The same happens in librespot and
+  go-librespot ([#1649](https://github.com/librespot-org/librespot/issues/1649),
+  [#279](https://github.com/devgianlu/go-librespot/issues/279)). Use `soloist`.
+- **Soloist needs a Windows PC (or a Linux machine) and its own API key.** It has
+  no phone or Pi-specific limits, but this app's loopback capture is Windows only.
 
 - **Sync is approximate**, usually within tens of milliseconds, but Bluetooth
   does not expose exact timing. Expect a small echo on some speaker pairs.

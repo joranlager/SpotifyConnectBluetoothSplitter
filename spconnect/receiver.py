@@ -57,6 +57,12 @@ VOLUME_UPDATE_DELAY = 0.5
 CONTEXT_FETCH_THRESHOLD = 2
 MAX_EXTRA_PAGES = 50
 MAX_CONSECUTIVE_UNAVAILABLE = 20
+MAX_CONSECUTIVE_KEY_REFUSALS = 3
+KEY_REFUSED_MESSAGE = (
+    "Spotify refused to give this app the keys needed to play tracks. "
+    "Some accounts are affected (a Spotify-side change that also breaks other "
+    "open-source players), and no setting here fixes it."
+)
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 
 _DEVICE_TYPES = {
@@ -207,6 +213,7 @@ class Receiver:
         self._activation_timestamp = 0
         self._last_cluster_timestamp = 0
         self._consecutive_unavailable = 0
+        self._consecutive_key_refusals = 0
         self._reconnect_attempt = 0
         self._reconnect_at: float | None = None
         self._track_info: TrackInfo | None = None
@@ -1284,6 +1291,7 @@ class Receiver:
             self._track_info = info
             state.update_duration(info.duration_ms)
             self._consecutive_unavailable = 0
+            self._consecutive_key_refusals = 0
         elif kind == "end_of_track":
             self._handle_next(state.current_uri if state.repeat_track else None)
         elif kind == "loading":
@@ -1323,10 +1331,26 @@ class Receiver:
             uri = data.get("uri", "")
             state.mark_unavailable(uri)
             self._consecutive_unavailable += 1
+            # Spotify refusing the decryption key is a property of the account, not
+            # of one track: skipping on through the playlist only repeats it.
+            key_refused = "audio key" in str(data.get("reason", ""))
+            if key_refused:
+                self._consecutive_key_refusals += 1
+            limit = MAX_CONSECUTIVE_KEY_REFUSALS if key_refused else MAX_CONSECUTIVE_UNAVAILABLE
             if state.current_uri == uri:
-                if self._consecutive_unavailable > MAX_CONSECUTIVE_UNAVAILABLE:
-                    log.error("too many unplayable tracks in a row, stopping")
+                if self._consecutive_unavailable >= limit:
+                    if key_refused:
+                        log.error(
+                            "Spotify refused the audio key for %d tracks in a row; "
+                            "stopping. This is a known limit for some accounts "
+                            "(Spotify now requires PlayPlay DRM for them).",
+                            self._consecutive_key_refusals,
+                        )
+                        self._set_status(error=KEY_REFUSED_MESSAGE)
+                    else:
+                        log.error("too many unplayable tracks in a row, stopping")
                     self._consecutive_unavailable = 0
+                    self._consecutive_key_refusals = 0
                     self._handle_stop()
                 else:
                     self._handle_next(None)

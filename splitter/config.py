@@ -13,9 +13,12 @@ CHANNELS = 2
 SAMPLE_WIDTH = 2  # bytes per sample, S16LE
 BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * SAMPLE_WIDTH
 VALID_BITRATES = (96, 160, 320)
-# "builtin":   the pure-Python receiver in this repo (spconnect). No extra install.
+# "builtin":   the pure-Python receiver in this repo (spconnect). Spotify may refuse
+#              to hand it the audio keys on some accounts.
+# "soloist":   Spotify's official headless client. It plays on the Windows default
+#              output and we capture that with WASAPI loopback.
 # "librespot": an external librespot executable writing PCM to stdout.
-VALID_RECEIVERS = ("builtin", "librespot")
+VALID_RECEIVERS = ("builtin", "soloist", "librespot")
 
 
 def bytes_per_second(sample_rate: int) -> int:
@@ -37,6 +40,11 @@ class AppConfig:
     receiver: str = "builtin"
     librespot_path: str = "librespot"  # only used when receiver is "librespot"
     librespot_args: list[str] = field(default_factory=list)
+    soloist_path: str = "soloist"  # executable; also searched in ./tools/soloist next to the config
+    soloist_args: list[str] = field(default_factory=list)  # extra Soloist command-line flags
+    # File holding the Soloist API key. The SOLOIST_API_KEY environment variable wins
+    # over it. The key is a credential: it is never stored in this config.
+    soloist_api_key_file: str = ".soloist-api-key"
     bitrate: int = 320
     cache_dir: str | None = None
     buffer_seconds: float = 2.0
@@ -59,6 +67,10 @@ def parse_config(data: dict) -> AppConfig:
         receiver=str(data.get("receiver", "builtin")),
         librespot_path=str(data.get("librespot_path", "librespot")),
         librespot_args=[str(a) for a in data.get("librespot_args", [])],
+        soloist_path=str(data.get("soloist_path", "soloist")).strip() or "soloist",
+        soloist_args=[str(a) for a in data.get("soloist_args", [])],
+        soloist_api_key_file=str(data.get("soloist_api_key_file", ".soloist-api-key")).strip()
+        or ".soloist-api-key",
         bitrate=int(data.get("bitrate", 320)),
         cache_dir=data.get("cache_dir") or None,
         buffer_seconds=float(data.get("buffer_seconds", 2.0)),

@@ -30,7 +30,21 @@ class OutputInfo:
     max_channels: int
 
 
-def list_outputs() -> list[OutputInfo]:
+def refresh_devices() -> None:
+    """Make PortAudio rescan the audio devices.
+
+    PortAudio reads the device list once. When a Bluetooth speaker connects or
+    disconnects, Windows renumbers the devices, and a stale list makes opening a
+    stream fail with a confusing driver error. Only call this while no stream is
+    open: it shuts PortAudio down and starts it again.
+    """
+    sd._terminate()  # noqa: SLF001 - sounddevice documents this pair for refreshing
+    sd._initialize()  # noqa: SLF001
+
+
+def list_outputs(refresh: bool = False) -> list[OutputInfo]:
+    if refresh:
+        refresh_devices()
     hostapis = sd.query_hostapis()
     result = []
     for idx, dev in enumerate(sd.query_devices()):
@@ -79,7 +93,12 @@ class SpeakerStream:
     """
 
     def __init__(
-        self, name: str, device_index: int, buffer: RingBuffer, hostapi: str = ""
+        self,
+        name: str,
+        device_index: int,
+        buffer: RingBuffer,
+        hostapi: str = "",
+        samplerate: int = SAMPLE_RATE,
     ) -> None:
         self.name = name
         self.buffer = buffer
@@ -93,7 +112,7 @@ class SpeakerStream:
         self._stream = sd.RawOutputStream(
             device=device_index,
             extra_settings=extra,
-            samplerate=SAMPLE_RATE,
+            samplerate=samplerate,
             channels=CHANNELS,
             dtype="int16",
             blocksize=BLOCKSIZE,

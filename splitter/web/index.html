@@ -446,10 +446,14 @@
     <details class="advanced">
       <summary>Advanced</summary>
       <div class="item">
-        <div class="k">Spotify receiver<small>Built-in needs nothing else installed</small></div>
+        <div class="k">Spotify receiver<small>Soloist is Spotify’s official client; the sound is captured from this PC’s default output</small></div>
         <div class="seg" id="f_receiver">
-          <button data-v="builtin">Built-in</button><button data-v="librespot">librespot</button>
+          <button data-v="soloist">Soloist</button><button data-v="builtin">Built-in</button><button data-v="librespot">librespot</button>
         </div>
+      </div>
+      <div class="item soloist-only">
+        <div class="k">Soloist path<small>Looked for in tools/soloist next to the config; API key from SOLOIST_API_KEY or .soloist-api-key</small></div>
+        <input type="text" id="f_soloist_path" autocomplete="off" placeholder="soloist">
       </div>
       <div class="item librespot-only">
         <div class="k">librespot path<small>External librespot executable</small></div>
@@ -629,7 +633,7 @@
     } else if (sp.state === "ready") {
       hint.textContent = `Signed in as ${sp.username}. Choose “${s.device_name}” in Spotify to play.`;
     } else if (sp.state === "active") {
-      hint.textContent = `Playing from ${sp.username}’s Spotify`;
+      hint.textContent = sp.username ? `Playing from ${sp.username}’s Spotify` : "Playing";
     } else {
       hint.textContent = `Open Spotify on this network and choose “${s.device_name}” as the device`;
     }
@@ -883,6 +887,7 @@
     auto_latency_compensation: $("#f_auto_latency"),
     autostart: $("#f_autostart"),
     librespot_path: $("#f_librespot_path"),
+    soloist_path: $("#f_soloist_path"),
     cache_dir: $("#f_cache_dir"),
     web_host: $("#f_web_host"),
     web_port: $("#f_web_port"),
@@ -898,6 +903,7 @@
     F.auto_latency_compensation.checked = cfg.auto_latency_compensation;
     F.autostart.checked = cfg.autostart;
     F.librespot_path.value = cfg.librespot_path || "";
+    F.soloist_path.value = cfg.soloist_path || "";
     F.cache_dir.value = cfg.cache_dir || "";
     F.web_host.value = cfg.web_host || "";
     F.web_port.value = cfg.web_port || 8080;
@@ -915,6 +921,7 @@
   function setReceiver(v) {
     document.querySelectorAll("#f_receiver button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
     document.querySelectorAll(".librespot-only").forEach((el) => el.classList.toggle("hidden", v !== "librespot"));
+    document.querySelectorAll(".soloist-only").forEach((el) => el.classList.toggle("hidden", v !== "soloist"));
   }
 
   function readForm() {
@@ -927,6 +934,7 @@
       auto_latency_compensation: F.auto_latency_compensation.checked,
       autostart: F.autostart.checked,
       librespot_path: F.librespot_path.value.trim() || "librespot",
+      soloist_path: F.soloist_path.value.trim() || "soloist",
       cache_dir: F.cache_dir.value.trim() || null,
       web_host: F.web_host.value.trim() || "127.0.0.1",
       web_port: Number(F.web_port.value) || 8080,

@@ -164,8 +164,10 @@ def test_rejected_requests_still_get_their_reply(server):
 
 def test_oversized_body_is_refused(server):
     base, *_ = server
-    code, _, _ = _req(base, "PUT", "/api/config", raw=b"x" * (70 * 1024))
-    assert code == 413
+    for size in (70 * 1024, 300 * 1024):
+        for _ in range(10):
+            code, _, _ = _req(base, "PUT", "/api/config", raw=b"x" * size)
+            assert code == 413
 
 
 def test_transport_control_without_a_session_is_a_clean_error(server):

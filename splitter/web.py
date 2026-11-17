@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 UI_PATH = Path(__file__).parent / "web" / "index.html"
 MAX_BODY = 64 * 1024
+MAX_DRAIN = 8 * 1024 * 1024  # larger refused bodies are not read, only refused
 
 
 class _BadRequest(Exception):
@@ -71,7 +72,16 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
             except ValueError:
                 length = 0
             if length > MAX_BODY:
+                # Read (and discard) the body before refusing it, or the OS resets
+                # the connection and the client never sees the 413. Truly huge
+                # bodies are not read at all.
                 self.close_connection = True
+                remaining = length if length <= MAX_DRAIN else 0
+                while remaining > 0:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
                 self._error(413, "request body too large")
                 return False
             self._body = self.rfile.read(length) if length > 0 else b""
@@ -140,11 +150,9 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
         # ----- handlers ----------------------------------------------------
 
         def _get_outputs(self) -> None:
-            from .outputs import list_outputs
-
             outputs = [
                 {"index": o.index, "name": o.name, "hostapi": o.hostapi}
-                for o in list_outputs()
+                for o in engine.list_outputs()
             ]
             self._json(200, {"outputs": outputs})
 

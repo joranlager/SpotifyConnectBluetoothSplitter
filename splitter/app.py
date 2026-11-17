@@ -12,16 +12,22 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import BYTES_PER_SECOND, AppConfig, SpeakerConfig, save_config
+from .config import SAMPLE_RATE, AppConfig, SpeakerConfig, bytes_per_second, save_config
 from .fanout import FanOut
 from .librespot import LibrespotSource, build_command
 
 log = logging.getLogger(__name__)
 
+DEFAULT_OUTPUT_NOTE = (
+    "This is the Windows default output, which the app listens to, so playing to it "
+    "would echo. In Windows Sound settings, pick a different default output (or set the "
+    "output of Soloist alone to another device), or choose another speaker."
+)
 
-def _ms_to_bytes(ms: float) -> int:
+
+def _ms_to_bytes(ms: float, rate: int = SAMPLE_RATE) -> int:
     frame = 4  # 2 channels * 2 bytes
-    n = int(BYTES_PER_SECOND * ms / 1000.0)
+    n = int(bytes_per_second(rate) * ms / 1000.0)
     return n - n % frame
 
 
@@ -37,7 +43,8 @@ class _Runtime:
 @dataclass
 class _State:
     fan: FanOut | None = None
-    source: object | None = None  # LibrespotSource or builtin.BuiltinSource
+    source: object | None = None  # LibrespotSource, BuiltinSource or SoloistSource
+    rate: int = SAMPLE_RATE  # sample rate of the audio flowing through the fan-out
     speakers: list[_Runtime] = field(default_factory=list)
     started_at: float | None = None
     last_error: str | None = None
@@ -57,6 +64,13 @@ class Engine:
     def config(self) -> AppConfig:
         return self._cfg
 
+    def list_outputs(self):
+        """The audio outputs Windows has now. Rescans devices unless we are streaming."""
+        from .outputs import list_outputs
+
+        with self._lock:
+            return list_outputs(refresh=self._st.source is None)
+
     def running(self) -> bool:
         with self._lock:
             return self._st.source is not None and self._st.source.running
@@ -74,9 +88,28 @@ class Engine:
                 self._st.last_error = "No speakers configured. Add one in Settings."
                 return False
 
-            outputs = list_outputs()
+            # The audio format. The built-in receiver and librespot deliver 44.1 kHz;
+            # Soloist plays on the Windows default output, so we capture that and the
+            # pipeline runs at the capture's rate.
+            rate = SAMPLE_RATE
+            capture = None
+            if cfg.receiver == "soloist":
+                from .capture import CaptureError, probe_loopback
+
+                try:
+                    capture = probe_loopback()
+                except CaptureError as exc:
+                    self._st.last_error = f"Cannot capture the default output: {exc}"
+                    log.error("%s", self._st.last_error)
+                    return False
+                rate = capture.rate
+                log.info("capturing %s at %d Hz", capture.name, rate)
+
+            # No stream of ours is open here, so it is safe to rescan: speakers that
+            # connected since the last start would otherwise be missing or misnumbered.
+            outputs = list_outputs(refresh=True)
             fan = FanOut()
-            capacity = _ms_to_bytes(cfg.buffer_seconds * 1000)
+            capacity = _ms_to_bytes(cfg.buffer_seconds * 1000, rate)
             runtimes: list[_Runtime] = []
             for spk in cfg.speakers:
                 try:
@@ -85,9 +118,13 @@ class Engine:
                     self._skipped[spk.match] = str(exc)
                     log.warning("skipping speaker: %s", exc)
                     continue
+                if capture is not None and info.name.lower() == capture.output_name.lower():
+                    self._skipped[spk.match] = DEFAULT_OUTPUT_NOTE
+                    log.warning("skipping %s: it is the default output being captured", info.name)
+                    continue
                 buf = fan.add(spk.match, capacity)
                 try:
-                    stream = SpeakerStream(spk.match, info.index, buf, info.hostapi)
+                    stream = SpeakerStream(spk.match, info.index, buf, info.hostapi, rate)
                 except Exception as exc:  # PortAudio errors vary by driver
                     self._skipped[spk.match] = f"could not open: {exc}"
                     log.warning("could not open %s: %s", info.name, exc)
@@ -111,7 +148,7 @@ class Engine:
                 if cfg.auto_latency_compensation:
                     extra += max_latency_ms - r.stream.latency * 1000
                 r.alignment_ms = extra
-                fan.get(r.match).prime(_ms_to_bytes(extra))
+                fan.get(r.match).prime(_ms_to_bytes(extra, rate))
 
             for r in runtimes:
                 r.stream.start()
@@ -121,6 +158,10 @@ class Engine:
                     from .builtin import BuiltinSource
 
                     source = BuiltinSource(cfg, fan, self._receiver_state_path())
+                elif cfg.receiver == "soloist":
+                    from .soloist import SoloistSource
+
+                    source = SoloistSource(cfg, fan, self._base_dir(), capture)
                 else:
                     source = LibrespotSource(build_command(cfg), on_audio=fan.write)
                 source.start()
@@ -129,6 +170,8 @@ class Engine:
                     r.stream.close()
                 if cfg.receiver == "builtin":
                     message = f"Could not start the Spotify Connect receiver: {exc}"
+                elif cfg.receiver == "soloist":
+                    message = str(exc)
                 else:
                     message = (
                         f"Could not start librespot ({cfg.librespot_path}): {exc}. "
@@ -139,6 +182,7 @@ class Engine:
                 return False
             self._st.fan = fan
             self._st.source = source
+            self._st.rate = rate
             self._st.speakers = runtimes
             self._st.started_at = time.monotonic()
             log.info("streaming to %d speaker(s)", len(runtimes))
@@ -164,9 +208,15 @@ class Engine:
     def check_health(self) -> None:
         """Record an error if the receiver exited while we think it is running."""
         with self._lock:
-            if self._st.source is not None and not self._st.source.running:
+            source = self._st.source
+            if source is not None and not source.running:
+                reason = source.exit_error() if hasattr(source, "exit_error") else None
                 self.stop()
-                self._st.last_error = "The Spotify receiver stopped. Check the console for details."
+                self._st.last_error = reason or "The Spotify receiver stopped. Check the console for details."
+
+    def _base_dir(self) -> Path:
+        """Folder of the config file; where keys, data and tools are looked for."""
+        return self._config_path.resolve().parent if self._config_path else Path.cwd()
 
     def _receiver_state_path(self) -> Path | None:
         """Where the built-in receiver keeps its device id and saved login."""
@@ -258,7 +308,7 @@ class Engine:
                         hostapi=r.hostapi,
                         latency_ms=round(r.stream.latency * 1000, 1),
                         alignment_ms=round(r.alignment_ms, 1),
-                        buffered_ms=round(buf.buffered * 1000 / BYTES_PER_SECOND, 1),
+                        buffered_ms=round(buf.buffered * 1000 / bytes_per_second(st.rate), 1),
                         underruns=r.stream.underruns,
                         dropped_bytes=buf.dropped_bytes,
                         note=None,
