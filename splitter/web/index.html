@@ -211,7 +211,15 @@
     background: var(--card); color: var(--text); font-size: 17px; line-height: 1;
     box-shadow: 0 1px 2px rgba(0,0,0,.08);
   }
-  .stepper span { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .stepper span { text-align: center; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--secondary); }
+  .stepper .delay-input {
+    width: 58px; border: 0; background: transparent; text-align: right; font-size: 13px;
+    font-variant-numeric: tabular-nums; outline: none; padding: 4px 0; -moz-appearance: textfield; appearance: textfield;
+  }
+  .stepper .delay-input::-webkit-outer-spin-button, .stepper .delay-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .stepper .unit { margin: 0 4px 0 2px; }
+  .stepper button + button { margin-left: 2px; }
+  .stepper .dec1, .stepper .inc1 { width: 24px; height: 24px; font-size: 14px; background: transparent; box-shadow: none; color: var(--secondary); }
 
   .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 12px; color: var(--secondary); }
   .metrics b { display: block; color: var(--text); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -404,7 +412,7 @@
   </section>
 
   <!-- Speakers -->
-  <div class="section-title"><span>Speakers</span><button class="btn small plain" id="scanBtn">Refresh devices</button></div>
+  <div class="section-title"><span>Speakers</span><span style="display:flex;gap:8px"><button class="btn small plain" id="syncBtn" title="Plays a click on every speaker. If it sounds doubled, raise the delay of the speaker that is early.">Sync test</button><button class="btn small plain" id="scanBtn">Refresh devices</button></span></div>
   <div id="speakers" class="grid"></div>
   <div id="noSpeakers" class="card empty hidden">
     <p style="margin:0 0 4px;font-weight:600;color:var(--text)">No speakers yet</p>
@@ -609,6 +617,9 @@
       banner.classList.add("hidden");
     }
     renderSpotify();
+    const sync = $("#syncBtn");
+    sync.disabled = s.state !== "running" || !!s.sync_test;
+    sync.textContent = s.sync_test ? "Testing…" : "Sync test";
   }
 
   // ---------- rendering: Spotify connection and now playing ----------
@@ -715,9 +726,12 @@
         <span class="label">Delay</span>
         <div class="grow"></div>
         <div class="stepper">
-          <button class="dec" aria-label="Less delay">−</button>
-          <span class="delay-val"></span>
-          <button class="inc" aria-label="More delay">+</button>
+          <button class="dec10" aria-label="Less delay by 10 ms" title="−10 ms">−</button>
+          <button class="dec1" aria-label="Less delay by 1 ms" title="−1 ms">‹</button>
+          <input class="delay-input" type="number" min="0" max="5000" step="1" inputmode="numeric" aria-label="Delay in milliseconds">
+          <span class="unit">ms</span>
+          <button class="inc1" aria-label="More delay by 1 ms" title="+1 ms">›</button>
+          <button class="inc10" aria-label="More delay by 10 ms" title="+10 ms">+</button>
         </div>
       </div>
       <div class="bufbar"><i></i></div>
@@ -753,7 +767,8 @@
       vol.style.setProperty("--p", `${Math.round(sp.volume * 100)}%`);
       $(".vol-val", el).textContent = `${Math.round(sp.volume * 100)}%`;
     }
-    $(".delay-val", el).textContent = `${Math.round(sp.delay_ms)} ms`;
+    const delayInput = $(".delay-input", el);
+    if (document.activeElement !== delayInput) delayInput.value = Math.round(sp.delay_ms);
     $(".m-lat", el).textContent = live ? `${Math.round(sp.latency_ms)} ms` : "–";
     $(".m-buf", el).textContent = live ? `${Math.round(sp.buffered_ms)} ms` : "–";
     $(".m-und", el).textContent = live ? String(sp.underruns) : "–";
@@ -807,16 +822,27 @@
       patchSpeaker(match, { muted });
     });
     const delayOf = () => Number(el.dataset.delay || 0);
-    $(".dec", el).addEventListener("click", () => setDelay(match, delayOf() - 10));
-    $(".inc", el).addEventListener("click", () => setDelay(match, delayOf() + 10));
+    $(".dec10", el).addEventListener("click", () => setDelay(match, delayOf() - 10));
+    $(".dec1", el).addEventListener("click", () => setDelay(match, delayOf() - 1));
+    $(".inc1", el).addEventListener("click", () => setDelay(match, delayOf() + 1));
+    $(".inc10", el).addEventListener("click", () => setDelay(match, delayOf() + 10));
+    const delayInput = $(".delay-input", el);
+    delayInput.addEventListener("input", () => {
+      const n = Number(delayInput.value);
+      if (Number.isFinite(n) && delayInput.value !== "") setDelay(match, Math.round(n), true);
+    });
     $(".remove", el).addEventListener("click", () => removeSpeaker(match));
   }
 
-  function setDelay(match, ms) {
+  function setDelay(match, ms, typing = false) {
     ms = Math.max(0, Math.min(5000, ms));
     const el = cards.get(match);
-    if (el) { el.dataset.delay = ms; $(".delay-val", el).textContent = `${ms} ms`; }
-    debounce("delay:" + match, 500, () => patchSpeaker(match, { delay_ms: ms }, "Delay applied, stream restarted"));
+    if (el) {
+      el.dataset.delay = ms;
+      if (!typing) $(".delay-input", el).value = ms;
+    }
+    // Applied live: the music keeps playing.
+    debounce("delay:" + match, 350, () => patchSpeaker(match, { delay_ms: ms }));
   }
 
   async function patchSpeaker(match, changes, okMsg) {
@@ -990,6 +1016,16 @@
   });
   $("#restartBtn").addEventListener("click", () => control("restart"));
   $("#scanBtn").addEventListener("click", () => { loadOutputs(); toast("Devices refreshed"); });
+
+  $("#syncBtn").addEventListener("click", async () => {
+    try {
+      await api("POST", "/api/control", { action: "sync_test" });
+      toast("Playing clicks on every speaker for 10 seconds. If a click sounds doubled, raise the delay of the speaker that is early.");
+      setTimeout(poll, 300);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
 
   // Transport controls act on the Spotify session; the next poll shows the result.
   async function transport(action) {

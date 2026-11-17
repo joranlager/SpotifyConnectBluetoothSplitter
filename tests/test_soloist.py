@@ -403,3 +403,43 @@ def test_listing_outputs_rescans_only_when_nothing_is_streaming(engine_env):
     engine.list_outputs()
     assert holder["refreshed"] == [False]  # streaming: a rescan would break the open streams
     engine.stop()
+
+
+def test_delay_changes_apply_live_without_restarting_the_receiver(engine_env):
+    make_engine, holder = engine_env
+    engine = make_engine(["Sonos Move"])
+    engine.start()
+    streams = len(FakeStream.instances)
+    buffer = FakeStream.instances[0].buffer
+
+    engine.update_speaker("Sonos Move", delay_ms=120)
+    assert buffer.prime_bytes == _ms_to_bytes(120, 48000)
+    assert engine.status()["speakers"][0]["alignment_ms"] == pytest.approx(120, abs=0.1)
+    assert holder["source"].running and not holder["source"].stopped
+    assert len(FakeStream.instances) == streams
+
+    engine.update_speaker("Sonos Move", delay_ms=20)
+    assert buffer.prime_bytes == _ms_to_bytes(20, 48000)
+    engine.stop()
+
+
+def test_sync_test_runs_on_the_fan_and_ends_with_the_engine(engine_env):
+    import time
+
+    make_engine, _ = engine_env
+    engine = make_engine(["Sonos Move"])
+    engine.start()
+    engine.sync_test()
+    time.sleep(0.2)
+    assert engine.status()["sync_test"] is True
+    engine._st.fan.write(b"from the source")  # held during the test
+    engine.stop()
+    engine._sync_thread.join(timeout=3)
+    assert engine.sync_active() is False
+
+
+def test_sync_test_needs_a_running_splitter(engine_env):
+    make_engine, _ = engine_env
+    engine = make_engine(["Sonos Move"])
+    with pytest.raises(ValueError, match="Start the splitter"):
+        engine.sync_test()

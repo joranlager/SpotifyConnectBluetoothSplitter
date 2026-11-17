@@ -6,7 +6,7 @@ Endpoints
     GET   /api/outputs       audio output devices visible to Windows
     GET   /api/config        current configuration
     PUT   /api/config        replace configuration (saved; restarts if streaming)
-    POST  /api/control       {"action": "start" | "stop" | "restart" | "play" | "pause" | "next" | "prev"}
+    POST  /api/control       {"action": "start" | "stop" | "restart" | "play" | "pause" | "next" | "prev" | "sync_test"}
     PATCH /api/speaker       {"match": ..., "volume"?, "muted"?, "delay_ms"?}
 
 Mutating requests must send Content-Type: application/json. Browsers cannot send
@@ -175,8 +175,12 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
                 engine.restart()
             elif action in ("play", "pause", "next", "prev"):
                 engine.control(action)
+            elif action == "sync_test":
+                engine.sync_test()
             else:
-                raise _BadRequest("action must be start, stop, restart, play, pause, next or prev")
+                raise _BadRequest(
+                    "action must be start, stop, restart, play, pause, next, prev or sync_test"
+                )
             self._json(200, {"status": engine.status()})
 
         def _patch_speaker(self) -> None:

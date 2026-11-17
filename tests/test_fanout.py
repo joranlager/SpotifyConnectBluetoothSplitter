@@ -164,3 +164,72 @@ def test_fanout_pending_is_the_emptiest_buffer():
     assert (a.pending, b.pending) == (40, 40)
     b.read(10)  # one speaker ran ahead
     assert fan.pending_bytes() == 30
+
+
+def test_set_prime_adds_delay_behind_queued_audio():
+    buf = RingBuffer(1000)
+    buf.prime(10)
+    buf.write(b"A" * 20)
+    buf.set_prime(30)  # 20 more bytes of delay
+    buf.write(b"X" * 5)
+    assert buf.read(1000) == bytes(10) + b"A" * 20 + bytes(20) + b"X" * 5
+    assert buf.prime_bytes == 30
+
+
+def test_set_prime_lower_skips_ahead_by_exactly_the_difference():
+    buf = RingBuffer(1000)
+    buf.prime(30)
+    buf.write(b"B" * 5)
+    buf.set_prime(10)  # 20 bytes less delay: drop the 20 oldest bytes
+    assert buf.read(1000) == bytes(10) + b"B" * 5
+    assert buf.prime_bytes == 10
+
+
+def test_set_prime_lower_than_what_is_queued_does_not_fail():
+    buf = RingBuffer(1000)
+    buf.prime(50)
+    buf.read(45)
+    buf.set_prime(0)
+    assert buf.prime_bytes == 0
+    buf.write(b"ok")
+    assert buf.read(10) == b"ok"
+
+
+def test_flush_restores_the_changed_delay():
+    buf = RingBuffer(1000)
+    buf.prime(8)
+    buf.set_prime(24)
+    buf.write(b"zzz")
+    buf.flush()
+    assert buf.read(100) == bytes(24)
+
+
+def test_max_pending_caps_how_far_a_slow_speaker_can_fall_behind():
+    buf = RingBuffer(10_000)
+    buf.prime(20)
+    buf.max_pending = 100
+    buf.write(bytes(range(150)))
+    assert buf.dropped_bytes == 50
+    assert buf.read(1000)[-10:] == bytes(range(140, 150))  # newest audio kept
+
+
+def test_max_pending_is_not_hit_in_normal_operation():
+    buf = RingBuffer(10_000)
+    buf.prime(20)
+    buf.max_pending = 1000
+    for _ in range(50):
+        buf.write(b"x" * 10)
+        buf.read(10)
+    assert buf.dropped_bytes == 0
+
+
+def test_hold_input_drops_the_source_but_not_forced_writes():
+    fan = FanOut()
+    buf = fan.add("a", 1000)
+    fan.hold_input(True)
+    fan.write(b"source")
+    fan.write(b"TEST", force=True)
+    assert buf.read(100) == b"TEST"
+    fan.hold_input(False)
+    fan.write(b"source")
+    assert buf.read(100) == b"source"
