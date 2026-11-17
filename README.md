@@ -12,6 +12,10 @@ It has three ways to receive Spotify (set `receiver` in the config):
   No extra install, but Spotify refuses it the audio keys on some accounts.
 - **`librespot`** — an external librespot program.
 
+On Linux x86_64 there is also [`headless/`](headless/): **spotify-headless**, a
+Rust tool that runs the *official Spotify desktop client* headless and exposes
+its audio as PCM. See [Official Spotify client on Linux](#official-spotify-client-on-linux-spotify-headless).
+
 The app itself (`splitter/`) copies the audio to one buffer per speaker, keeps
 the speakers aligned, and serves a web UI to control it. The built-in receiver
 is:
@@ -119,6 +123,42 @@ connects, Windows may make it the default, so check this after connecting.
 
 The capture runs at the default output's sample rate (often 48 kHz) and the
 app follows it.
+
+## Official Spotify client on Linux (spotify-headless)
+
+[`headless/`](headless/) is a small Rust program that runs Spotify's **official
+desktop client** on a headless Linux x86_64 board. The client does all the
+decoding and DRM itself and shows up in Spotify's device list like any other
+Connect device, so a phone can transfer playback to it. This tool only does the
+wiring around it, the way a mixer app would:
+
+```
+phone ──Connect──> official Spotify client ──> virtual sink ──monitor──> parec ──PCM──> splitter
+                   (on an Xvfb display)        (PULSE_SINK)               (stdout or FIFO)
+```
+
+- creates a virtual PulseAudio/PipeWire sink and removes it on exit,
+- starts Xvfb (private auth cookie) and the Spotify client pinned to that
+  display and sink,
+- optionally writes the sink's audio as raw PCM (s16le, stereo, 44.1 kHz) to
+  stdout or a FIFO,
+- optionally runs x11vnc on the loopback, so you can sign in once,
+- keeps everything running and restarts it with a backoff.
+
+```bash
+cd headless
+cargo build --release
+./target/release/spotify-headless doctor --pcm-out - --vnc-port 5900   # check the board
+./target/release/spotify-headless run --data-dir ~/.local/share/spotify-headless --pcm-out /run/user/1000/spotify.pcm
+```
+
+Full instructions (first login over VNC, options, a systemd unit) are in
+[headless/README.md](headless/README.md).
+
+**Status:** the logic is unit-tested and the Linux code type-checks, but the
+whole chain has not been run yet against a real Spotify client. The Python
+splitter does not read this PCM on Linux yet: its capture is still Windows
+WASAPI loopback.
 
 ## Run
 
