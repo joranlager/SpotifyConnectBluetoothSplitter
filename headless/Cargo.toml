@@ -1,0 +1,12 @@
+[package]
+name = "spotify-headless"
+version = "0.1.0"
+edition = "2021"
+description = "Runs the official Spotify desktop client headless on Linux and exposes its audio as a PulseAudio/PipeWire monitor source"
+publish = false
+
+[dependencies]
+ctrlc = { version = "3", features = ["termination"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

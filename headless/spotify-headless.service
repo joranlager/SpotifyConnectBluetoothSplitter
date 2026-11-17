@@ -1,0 +1,20 @@
+# systemd USER unit. Install with:
+#   mkdir -p ~/.config/systemd/user
+#   cp spotify-headless.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now spotify-headless
+#   loginctl enable-linger "$USER"     # keep the user session (and audio) alive without a login
+#
+# Adjust ExecStart to where you installed the binary and to your splitter's input.
+[Unit]
+Description=Official Spotify client, headless, with its audio on a virtual sink
+After=pipewire.service pipewire-pulse.service pulseaudio.service network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/spotify-headless run --data-dir %h/.local/share/spotify-headless --pcm-out %t/spotify-headless.pcm
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
