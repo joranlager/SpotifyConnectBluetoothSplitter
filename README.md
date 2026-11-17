@@ -148,8 +148,10 @@ Options: `--host 0.0.0.0` and `--port 8080` override the web settings,
 - **Control**: start, stop or restart the device; play, pause, next and previous.
 - **Monitor**: what is playing and its position, throughput history, and per
   speaker latency, buffer level and underruns.
-- **Speakers**: per-speaker volume and mute, live. Delay changes restart the
-  stream. Add speakers from the detected devices list, or remove them.
+- **Speakers**: per-speaker volume, mute and delay, all live (nothing restarts,
+  so Spotify keeps playing). The delay has -10/-1/+1/+10 ms buttons and an
+  editable field. Press **Sync test** to play a click every second on every
+  speaker for 10 seconds. Add speakers from the detected devices list, or remove them.
 - **Settings**: device name, quality, buffer, speaker alignment, autostart and
   advanced options. Changes are saved to `config.json`; the stream restarts if
   it is running.
@@ -206,6 +208,13 @@ stored in `config.json`.
   of silence. That lead is restored after every pause, seek and track change.
   Reported latency for Bluetooth is often approximate, so if you hear an echo,
   adjust `delay_ms` for the speaker that is early.
+- **Syncing by ear**: Windows reports the same latency for most Bluetooth
+  speakers (for example 42.7 ms for two Sonos Move), so the real difference has
+  to be tuned by ear. Press Sync test, and if the click sounds doubled, raise
+  the delay of the speaker you hear first (start with 10 ms steps, then 1 ms)
+  until it sounds like one click. The change is live and saved.
+- A speaker can lead the source by at most 600 ms: if its clock runs slow, its
+  oldest audio is dropped so it cannot drift far out of sync with the others.
 - If a speaker falls behind, its oldest audio is dropped, and if it runs dry it
   plays silence. Other speakers are never blocked.
 - A speaker that is off or unavailable at startup is skipped with a warning.

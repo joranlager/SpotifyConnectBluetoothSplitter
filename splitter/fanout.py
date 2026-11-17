@@ -26,6 +26,10 @@ class RingBuffer:
         self._buf = bytearray()
         self._lock = threading.Lock()
         self._prime = 0
+        # Most real audio allowed to wait in the queue. Output devices run on their
+        # own clocks, so a speaker that plays slightly slower than the source would
+        # otherwise fall further and further behind the others. None = no cap.
+        self.max_pending: int | None = None
         # True while running dry is expected (nothing written yet, or just flushed).
         self._dry = True
         self.dropped_bytes = 0
@@ -52,6 +56,8 @@ class RingBuffer:
             self._buf += data
             self._dry = False
             overflow = len(self._buf) - self._capacity
+            if self.max_pending is not None:
+                overflow = max(overflow, len(self._buf) - self._prime - self.max_pending)
             if overflow > 0:
                 del self._buf[:overflow]
                 self.dropped_bytes += overflow
@@ -80,6 +86,30 @@ class RingBuffer:
             self._prime += n
             self._buf += bytes(n)
 
+    def set_prime(self, n: int) -> None:
+        """Change the alignment delay while playing, without restarting.
+
+        More delay queues extra silence behind the audio already waiting. Less
+        delay skips ahead by dropping that much of the oldest queued audio (a
+        short, one-off jump). Either way the speaker's delay changes by exactly
+        the difference, and flush() keeps restoring the new value.
+        """
+        n = max(0, int(n))
+        with self._lock:
+            diff = n - self._prime
+            if diff > 0:
+                self._capacity += diff
+                self._buf += bytes(diff)
+            elif diff < 0:
+                self._capacity = max(1, self._capacity + diff)
+                del self._buf[: min(-diff, len(self._buf))]
+            self._prime = n
+
+    @property
+    def prime_bytes(self) -> int:
+        with self._lock:
+            return self._prime
+
     def flush(self) -> None:
         """Drop queued audio, keeping only the alignment silence."""
         with self._lock:
@@ -94,6 +124,7 @@ class FanOut:
         self._sinks: dict[str, RingBuffer] = {}
         self._lock = threading.Lock()
         self.bytes_in = 0  # total bytes received from the source
+        self._hold = False  # while True, audio from the source is dropped (sync test)
 
     def add(self, name: str, capacity_bytes: int) -> RingBuffer:
         with self._lock:
@@ -119,11 +150,18 @@ class FanOut:
         with self._lock:
             return list(self._sinks.values())
 
-    def write(self, chunk: bytes) -> None:
+    def hold_input(self, hold: bool) -> None:
+        """Drop (True) or accept (False) audio from the source. Forced writes still pass."""
+        with self._lock:
+            self._hold = hold
+
+    def write(self, chunk: bytes, force: bool = False) -> None:
         if not chunk:
             return
         with self._lock:
             self.bytes_in += len(chunk)
+            if self._hold and not force:
+                return
             sinks = list(self._sinks.values())
         for buf in sinks:
             buf.write(chunk)

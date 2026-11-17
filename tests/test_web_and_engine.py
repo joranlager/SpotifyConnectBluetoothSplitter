@@ -182,3 +182,19 @@ def test_status_names_the_receiver(server):
     status = json.loads(_req(base, "GET", "/api/status")[1])
     assert status["receiver"] == "builtin"
     assert status["spotify"] is None
+
+
+def test_sync_test_without_a_running_splitter_is_a_clean_error(server):
+    base, *_ = server
+    code, body, _ = _req(base, "POST", "/api/control", {"action": "sync_test"})
+    assert code == 400
+    assert "Start the splitter" in json.loads(body)["error"]
+
+
+def test_delay_patch_is_persisted_without_a_running_stream(server):
+    base, engine, cfg_path = server
+    code, _, _ = _req(base, "PATCH", "/api/speaker", {"match": "JBL", "delay_ms": 180})
+    assert code == 200
+    assert load_config(cfg_path).speakers[0].delay_ms == 180
+    code, _, _ = _req(base, "PATCH", "/api/speaker", {"match": "JBL", "delay_ms": 9000})
+    assert code == 400

@@ -18,6 +18,11 @@ from .librespot import LibrespotSource, build_command
 
 log = logging.getLogger(__name__)
 
+# How far ahead of its output a speaker's queue may get. Output devices run on their
+# own clocks; this keeps a slightly slow one from drifting out of sync over time.
+MAX_LEAD_MS = 600
+SYNC_TEST_SECONDS = 10
+
 DEFAULT_OUTPUT_NOTE = (
     "This is the Windows default output, which the app listens to, so playing to it "
     "would echo. In Windows Sound settings, pick a different default output (or set the "
@@ -37,7 +42,8 @@ class _Runtime:
     device_name: str
     hostapi: str
     stream: object  # outputs.SpeakerStream (imported lazily)
-    alignment_ms: float = 0.0
+    alignment_ms: float = 0.0  # total head start of silence: manual delay + auto part
+    auto_ms: float = 0.0  # the part that evens out the speakers' reported latencies
 
 
 @dataclass
@@ -57,6 +63,8 @@ class Engine:
         self._lock = threading.RLock()
         self._st = _State()
         self._skipped: dict[str, str] = {}  # match -> reason, from the last start
+        self._sync_stop = threading.Event()
+        self._sync_thread: threading.Thread | None = None
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -123,6 +131,7 @@ class Engine:
                     log.warning("skipping %s: it is the default output being captured", info.name)
                     continue
                 buf = fan.add(spk.match, capacity)
+                buf.max_pending = _ms_to_bytes(MAX_LEAD_MS, rate)
                 try:
                     stream = SpeakerStream(spk.match, info.index, buf, info.hostapi, rate)
                 except Exception as exc:  # PortAudio errors vary by driver
@@ -144,11 +153,9 @@ class Engine:
             spk_by_match = {s.match: s for s in cfg.speakers}
             for r in runtimes:
                 manual = spk_by_match[r.match].delay_ms
-                extra = manual
-                if cfg.auto_latency_compensation:
-                    extra += max_latency_ms - r.stream.latency * 1000
-                r.alignment_ms = extra
-                fan.get(r.match).prime(_ms_to_bytes(extra, rate))
+                r.auto_ms = (max_latency_ms - r.stream.latency * 1000) if cfg.auto_latency_compensation else 0.0
+                r.alignment_ms = manual + r.auto_ms
+                fan.get(r.match).prime(_ms_to_bytes(r.alignment_ms, rate))
 
             for r in runtimes:
                 r.stream.start()
@@ -189,6 +196,7 @@ class Engine:
             return True
 
     def stop(self) -> None:
+        self._sync_stop.set()
         with self._lock:
             st = self._st
             if st.source is not None:
@@ -251,12 +259,11 @@ class Engine:
             return True
 
     def update_speaker(self, match: str, **changes) -> SpeakerConfig:
-        """Change one speaker. volume/muted apply live; delay_ms restarts the stream."""
+        """Change one speaker. volume, muted and delay_ms all apply live."""
         with self._lock:
             spk = next((s for s in self._cfg.speakers if s.match == match), None)
             if spk is None:
                 raise KeyError(match)
-            needs_restart = False
             if "volume" in changes:
                 spk.volume = min(1.0, max(0.0, float(changes["volume"])))
             if "muted" in changes:
@@ -266,15 +273,39 @@ class Engine:
                 if not 0 <= delay <= 5000:
                     raise ValueError("delay_ms must be between 0 and 5000")
                 spk.delay_ms = delay
-                needs_restart = True
             for r in self._st.speakers:
                 if r.match == match:
                     r.stream.volume = spk.volume
                     r.stream.muted = spk.muted
+                    if "delay_ms" in changes and self._st.fan is not None:
+                        # Applied live: restarting would also restart the Spotify
+                        # receiver and drop the playing session.
+                        r.alignment_ms = spk.delay_ms + r.auto_ms
+                        self._st.fan.get(r.match).set_prime(_ms_to_bytes(r.alignment_ms, self._st.rate))
             self._persist()
-            if needs_restart and self._st.source is not None:
-                self.restart()
             return spk
+
+    # ----- sync test --------------------------------------------------------
+
+    def sync_active(self) -> bool:
+        thread = self._sync_thread
+        return thread is not None and thread.is_alive()
+
+    def sync_test(self, seconds: int = SYNC_TEST_SECONDS) -> None:
+        """Play a click every second on all speakers, to hear and adjust their offset."""
+        from .synctest import run_sync_test
+
+        with self._lock:
+            fan, rate = self._st.fan, self._st.rate
+            if fan is None or not self._st.speakers:
+                raise ValueError("Start the splitter first, then run the sync test.")
+            if self.sync_active():
+                return
+            self._sync_stop = threading.Event()
+            self._sync_thread = threading.Thread(
+                target=run_sync_test, args=(fan, rate, seconds, self._sync_stop), name="sync-test", daemon=True
+            )
+            self._sync_thread.start()
 
     # ----- monitoring -------------------------------------------------------
 
@@ -320,6 +351,7 @@ class Engine:
             return {
                 "state": "running" if running else ("error" if st.last_error else "stopped"),
                 "receiver": self._cfg.receiver,
+                "sync_test": self.sync_active(),
                 "spotify": spotify,
                 "device_name": self._cfg.device_name,
                 "uptime_s": round(time.monotonic() - st.started_at) if running and st.started_at else 0,
