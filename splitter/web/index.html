@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bluetooth Splitter</title>
+<meta name="description" content="Configure, control and monitor the Spotify Connect to Bluetooth splitter.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%230071e3'/%3E%3Ccircle cx='12' cy='12' r='3.5' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --secondary: #6e6e73;
+    --tertiary: #86868b;
+    --separator: rgba(60, 60, 67, 0.14);
+    --fill: #e9e9ed;
+    --blue: #0071e3;
+    --blue-hover: #0077ed;
+    --green: #34c759;
+    --red: #ff3b30;
+    --orange: #ff9f0a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+    --bar: rgba(255, 255, 255, 0.72);
+    --radius: 18px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000;
+      --card: #1c1c1e;
+      --text: #f5f5f7;
+      --secondary: #a1a1a6;
+      --tertiary: #8e8e93;
+      --separator: rgba(84, 84, 88, 0.55);
+      --fill: #2c2c2e;
+      --blue: #0a84ff;
+      --blue-hover: #409cff;
+      --green: #30d158;
+      --red: #ff453a;
+      --orange: #ff9f0a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
+      --bar: rgba(28, 28, 30, 0.72);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --text: #f5f5f7;
+    --secondary: #a1a1a6;
+    --tertiary: #8e8e93;
+    --separator: rgba(84, 84, 88, 0.55);
+    --fill: #2c2c2e;
+    --blue: #0a84ff;
+    --blue-hover: #409cff;
+    --green: #30d158;
+    --red: #ff453a;
+    --orange: #ff9f0a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --bar: rgba(28, 28, 30, 0.72);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  .hidden { display: none !important; }
+
+  /* ----- top bar ----- */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bar);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--separator);
+  }
+  .topbar-inner {
+    max-width: 1040px; margin: 0 auto; padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .brand { font-weight: 600; font-size: 17px; letter-spacing: -0.02em; flex: 1; min-width: 0; }
+  .brand small { display: block; font-weight: 400; color: var(--secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 12px; border-radius: 999px; background: var(--fill);
+    font-size: 13px; font-weight: 500; white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tertiary); display: inline-block; }
+  .pill.running .dot { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 25%, transparent); animation: pulse 2s infinite; }
+  .pill.error .dot { background: var(--red); }
+  .pill.offline .dot { background: var(--orange); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 7px transparent; } }
+
+  .btn {
+    border: 0; border-radius: 999px; padding: 8px 16px; cursor: pointer;
+    background: var(--blue); color: #fff; font-weight: 500; font-size: 14px;
+    transition: background .15s, transform .08s, opacity .15s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--blue-hover); }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.danger { background: var(--red); }
+  .btn.plain { background: var(--fill); color: var(--text); }
+  .btn.plain:hover { background: color-mix(in srgb, var(--fill) 80%, var(--text) 10%); }
+  .btn.small { padding: 5px 12px; font-size: 13px; }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
+    background: var(--fill); display: inline-grid; place-items: center; color: var(--text);
+  }
+  .icon-btn svg { width: 17px; height: 17px; }
+
+  /* ----- layout ----- */
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 120px; }
+  .section-title {
+    font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--secondary); margin: 28px 4px 10px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .section-title:first-child { margin-top: 0; }
+  .card {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 20px;
+  }
+  .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  .grid > * { min-width: 0; }
+  @media (min-width: 760px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .hero { grid-column: 1 / -1; }
+  }
+
+  .banner {
+    border-radius: 14px; padding: 12px 14px; margin-bottom: 16px;
+    background: color-mix(in srgb, var(--red) 14%, var(--card)); color: var(--text);
+    display: flex; gap: 10px; align-items: flex-start; font-size: 14px;
+  }
+  .banner.info { background: color-mix(in srgb, var(--blue) 12%, var(--card)); }
+
+  /* ----- hero ----- */
+  .hero-top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .hero-title { flex: 1; min-width: 200px; }
+  .hero-title h1 { font-size: 26px; letter-spacing: -0.025em; margin: 0 0 2px; font-weight: 650; }
+  .hero-title p { margin: 0; color: var(--secondary); }
+  .hero-actions { display: flex; gap: 8px; align-items: center; }
+  .now { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 14px; border-radius: 16px; background: var(--bg); }
+  .now-art {
+    width: 56px; height: 56px; border-radius: 12px; flex: none; display: grid; place-items: center; color: #fff;
+    background: linear-gradient(145deg, #30d158, #0a84ff);
+  }
+  .now-art svg { width: 26px; height: 26px; }
+  .now-meta { flex: 1; min-width: 0; }
+  .now-title { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now-sub { color: var(--secondary); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .progress { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; margin-top: 10px; }
+  .progress > i { display: block; height: 100%; width: 0; background: var(--text); border-radius: 2px; transition: width .9s linear; }
+  .now-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--tertiary); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .now-ctl { display: flex; align-items: center; gap: 8px; flex: none; }
+  .now-ctl .icon-btn { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .icon-btn.big { width: 44px; height: 44px; background: var(--text) !important; color: var(--card); }
+  .icon-btn.big svg { width: 20px; height: 20px; }
+  @media (max-width: 560px) {
+    .now { flex-wrap: wrap; }
+    .now-ctl { width: 100%; justify-content: center; }
+  }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+  .stat { background: var(--bg); border-radius: 14px; padding: 12px 14px; }
+  .stat .label { font-size: 12px; color: var(--secondary); }
+  .stat .value { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .spark { margin-top: 16px; height: 72px; width: 100%; display: block; }
+  .spark-caption { font-size: 12px; color: var(--tertiary); display: flex; justify-content: space-between; }
+
+  /* ----- speaker cards ----- */
+  .speaker { display: flex; flex-direction: column; gap: 14px; }
+  .speaker-head { display: flex; align-items: center; gap: 12px; }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+    background: linear-gradient(145deg, #5ac8fa, #0071e3); color: #fff; flex: none;
+  }
+  .avatar.off { background: var(--fill); color: var(--tertiary); }
+  .avatar svg { width: 22px; height: 22px; }
+  .speaker-name { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .speaker-sub { color: var(--secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .speaker-head .meta { min-width: 0; flex: 1; }
+  .status-tag { font-size: 12px; font-weight: 500; color: var(--green); }
+  .status-tag.off { color: var(--tertiary); }
+  .status-tag.warn { color: var(--orange); }
+
+  .row { display: flex; align-items: center; gap: 12px; }
+  .row .label { width: 64px; color: var(--secondary); font-size: 13px; flex: none; }
+  .row .grow { flex: 1; min-width: 0; }
+
+  .mute {
+    width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer; flex: none;
+    background: var(--fill); display: grid; place-items: center; color: var(--text);
+  }
+  .mute svg { width: 18px; height: 18px; }
+  .mute.on { background: var(--red); color: #fff; }
+
+  .stepper { display: inline-flex; align-items: center; background: var(--fill); border-radius: 999px; padding: 3px; }
+  .stepper button {
+    width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer;
+    background: var(--card); color: var(--text); font-size: 17px; line-height: 1;
+    box-shadow: 0 1px 2px rgba(0,0,0,.08);
+  }
+  .stepper span { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; font-size: 13px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 12px; color: var(--secondary); }
+  .metrics b { display: block; color: var(--text); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bufbar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+  .bufbar > i { display: block; height: 100%; width: 0; background: var(--green); border-radius: 3px; transition: width .4s ease; }
+  .speaker-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .link { background: none; border: 0; padding: 0; color: var(--red); cursor: pointer; font-size: 13px; }
+  .link.blue { color: var(--blue); }
+  .note { color: var(--orange); font-size: 13px; }
+
+  /* ----- sliders & switches ----- */
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; min-width: 0; height: 22px; background: transparent; margin: 0; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(to right, var(--blue) 0 var(--p, 50%), var(--fill) var(--p, 50%) 100%);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25), 0 0 0 .5px rgba(0,0,0,.04);
+  }
+  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--fill); }
+  input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--blue); }
+  input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  input[type="range"]:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 6px; }
+  .value-tag { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--secondary); font-size: 13px; }
+
+  .switch { position: relative; width: 51px; height: 31px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch .track {
+    position: absolute; inset: 0; border-radius: 999px; background: var(--fill);
+    transition: background .2s; cursor: pointer;
+  }
+  .switch .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.25); transition: transform .2s;
+  }
+  .switch input:checked + .track { background: var(--green); }
+  .switch input:checked + .track::after { transform: translateX(20px); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  /* ----- settings (inset grouped list) ----- */
+  .group { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 13px 16px; min-height: 52px; }
+  .item + .item { border-top: 1px solid var(--separator); }
+  .item .k { flex: 1; min-width: 0; }
+  .item .k small { display: block; color: var(--secondary); font-size: 12px; margin-top: 1px; }
+  .item input[type="text"], .item input[type="number"] {
+    border: 0; background: transparent; text-align: right; outline: none; min-width: 0; width: 55%;
+    color: var(--secondary); font-size: 15px; padding: 4px 0;
+  }
+  .item input::placeholder { color: var(--tertiary); }
+  .item input[type="range"] { width: 45%; }
+  .seg { display: inline-flex; background: var(--fill); border-radius: 9px; padding: 2px; }
+  .seg button {
+    border: 0; background: transparent; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: var(--text);
+  }
+  .seg button.active { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.14); }
+  .item .val { color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 14px; min-width: 52px; text-align: right; }
+
+  details.advanced summary {
+    list-style: none; cursor: pointer; padding: 13px 16px; color: var(--blue); font-weight: 500; display: flex; justify-content: space-between;
+  }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced summary::after { content: "›"; font-size: 20px; transform: rotate(90deg); transition: transform .2s; }
+  details.advanced[open] summary::after { transform: rotate(270deg); }
+  details.advanced[open] summary { border-bottom: 1px solid var(--separator); }
+
+  .outputs { display: grid; gap: 8px; }
+  .output { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--bg); }
+  .output .k { flex: 1; min-width: 0; }
+  .output .k b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .output .k small { color: var(--secondary); font-size: 12px; }
+  .empty { color: var(--secondary); text-align: center; padding: 26px 12px; }
+
+  /* ----- save bar ----- */
+  .savebar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--separator);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    display: flex; justify-content: center; transform: translateY(110%); transition: transform .25s ease;
+  }
+  .savebar.show { transform: translateY(0); }
+  .savebar-inner { width: 100%; max-width: 1040px; display: flex; align-items: center; gap: 12px; }
+  .savebar-inner span { flex: 1; color: var(--secondary); font-size: 14px; }
+
+  /* ----- toast ----- */
+  .toasts { position: fixed; left: 50%; top: 76px; transform: translateX(-50%); z-index: 30; display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); }
+  .toast {
+    background: var(--card); box-shadow: var(--shadow); border-radius: 14px; padding: 12px 16px; font-size: 14px;
+    animation: drop .25s ease; border: 1px solid var(--separator);
+  }
+  .toast.bad { color: var(--red); }
+  @keyframes drop { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+  .offline-overlay { display: none; }
+  body.offline .offline-overlay { display: block; }
+  .offline-overlay {
+    position: fixed; inset: auto 16px 16px 16px; max-width: 420px; margin: 0 auto; z-index: 25;
+    background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 14px 16px; font-size: 14px; border: 1px solid var(--separator);
+  }
+
+  footer { text-align: center; color: var(--tertiary); font-size: 12px; margin-top: 32px; }
+
+  @media (max-width: 480px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .stats .stat:last-child { grid-column: 1 / -1; }
+    .brand small { display: none; }
+    .hero-title h1 { font-size: 22px; }
+    .row .label { width: 56px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">Splitter<small id="brandSub">Spotify Connect to Bluetooth</small></div>
+    <span id="statePill" class="pill"><span class="dot"></span><span id="stateText">Connecting…</span></span>
+    <button id="toggleBtn" class="btn" disabled>Start</button>
+    <button id="restartBtn" class="icon-btn" title="Restart" aria-label="Restart streaming">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner hidden">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16.5v.01"/></svg>
+    <div id="bannerText"></div>
+  </div>
+
+  <!-- Monitor -->
+  <section>
+    <div class="grid">
+      <div class="card hero">
+        <div class="hero-top">
+          <div class="hero-title">
+            <h1 id="deviceName">Bluetooth Splitter</h1>
+            <p id="deviceHint">Visible in Spotify as a Connect device</p>
+          </div>
+          <div class="hero-actions">
+            <span id="uptimeTag" class="pill" style="background:transparent;border:1px solid var(--separator)">Not streaming</span>
+          </div>
+        </div>
+        <div id="now" class="now hidden">
+          <div class="now-art" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+          </div>
+          <div class="now-meta">
+            <div class="now-title" id="nowTitle"></div>
+            <div class="now-sub" id="nowSub"></div>
+            <div class="progress"><i id="nowBar"></i></div>
+            <div class="now-times"><span id="nowPos">0:00</span><span id="nowQuality"></span><span id="nowDur">0:00</span></div>
+          </div>
+          <div class="now-ctl">
+            <button class="icon-btn" id="prevBtn" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+            </button>
+            <button class="icon-btn big" id="playBtn" aria-label="Play or pause">
+              <svg viewBox="0 0 24 24" fill="currentColor" id="playIcon"><path d="M7 4v16l13-8z"/></svg>
+            </button>
+            <button class="icon-btn" id="nextBtn" aria-label="Next track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="label">Throughput</div><div class="value" id="kbps">0 kbps</div></div>
+          <div class="stat"><div class="label">Received</div><div class="value" id="received">0 MB</div></div>
+          <div class="stat"><div class="label">Speakers</div><div class="value" id="speakerCount">0 / 0</div></div>
+        </div>
+        <svg id="spark" class="spark" viewBox="0 0 600 72" preserveAspectRatio="none" aria-label="Throughput history">
+          <defs>
+            <linearGradient id="sparkFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stop-color="#0a84ff" stop-opacity="0.35"/>
+              <stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path id="sparkArea" fill="url(#sparkFill)" d=""/>
+          <path id="sparkLine" fill="none" stroke="#0071e3" stroke-width="2" vector-effect="non-scaling-stroke" d=""/>
+        </svg>
+        <div class="spark-caption"><span>Last 60 seconds</span><span id="peak">peak 0 kbps</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Speakers -->
+  <div class="section-title"><span>Speakers</span><button class="btn small plain" id="scanBtn">Refresh devices</button></div>
+  <div id="speakers" class="grid"></div>
+  <div id="noSpeakers" class="card empty hidden">
+    <p style="margin:0 0 4px;font-weight:600;color:var(--text)">No speakers yet</p>
+    <p style="margin:0">Pair your Bluetooth speakers in Windows, then add them below.</p>
+  </div>
+
+  <!-- Available outputs -->
+  <div class="section-title"><span>Available devices</span></div>
+  <div class="card">
+    <div id="outputs" class="outputs"></div>
+  </div>
+
+  <!-- Settings -->
+  <div class="section-title"><span>Settings</span></div>
+  <div class="group" id="settings">
+    <div class="item">
+      <div class="k">Device name<small>Shown in Spotify’s device list</small></div>
+      <input type="text" id="f_device_name" maxlength="60" autocomplete="off">
+    </div>
+    <div class="item">
+      <div class="k">Audio quality<small>Spotify streaming bitrate</small></div>
+      <div class="seg" id="f_bitrate">
+        <button data-v="96">96</button><button data-v="160">160</button><button data-v="320">320</button>
+      </div>
+    </div>
+    <div class="item">
+      <div class="k">Buffer<small>More buffer survives Wi-Fi hiccups but adds delay</small></div>
+      <input type="range" id="f_buffer_seconds" min="0.5" max="10" step="0.5">
+      <span class="val" id="f_buffer_val">2.0 s</span>
+    </div>
+    <div class="item">
+      <div class="k">Align speakers<small>Delay faster speakers so they play in sync</small></div>
+      <label class="switch"><input type="checkbox" id="f_auto_latency"><span class="track"></span></label>
+    </div>
+    <div class="item">
+      <div class="k">Start automatically<small>Begin streaming when the app launches</small></div>
+      <label class="switch"><input type="checkbox" id="f_autostart"><span class="track"></span></label>
+    </div>
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="item">
+        <div class="k">Spotify receiver<small>Built-in needs nothing else installed</small></div>
+        <div class="seg" id="f_receiver">
+          <button data-v="builtin">Built-in</button><button data-v="librespot">librespot</button>
+        </div>
+      </div>
+      <div class="item librespot-only">
+        <div class="k">librespot path<small>External librespot executable</small></div>
+        <input type="text" id="f_librespot_path" autocomplete="off" placeholder="librespot">
+      </div>
+      <div class="item librespot-only">
+        <div class="k">Credential cache<small>librespot’s cache folder</small></div>
+        <input type="text" id="f_cache_dir" autocomplete="off" placeholder="(none)">
+      </div>
+      <div class="item">
+        <div class="k">Web address<small>Use 0.0.0.0 to allow other devices (no login)</small></div>
+        <input type="text" id="f_web_host" autocomplete="off" placeholder="127.0.0.1">
+      </div>
+      <div class="item">
+        <div class="k">Web port<small>Takes effect after restarting the app</small></div>
+        <input type="number" id="f_web_port" min="1" max="65535">
+      </div>
+    </details>
+  </div>
+
+  <footer>Bluetooth Splitter · Changes to devices and quality apply when streaming restarts.</footer>
+</main>
+
+<div class="savebar" id="savebar">
+  <div class="savebar-inner">
+    <span>You have unsaved settings.</span>
+    <button class="btn plain" id="discardBtn">Discard</button>
+    <button class="btn" id="saveBtn">Save</button>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="offline-overlay" id="offline">Can’t reach the splitter. Retrying…</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- icons ----------
+  const ICON = {
+    speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="3.5"/><circle cx="12" cy="14.5" r="3.6"/><circle cx="12" cy="6.8" r="1.1"/></svg>',
+    volOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    volOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  };
+
+  // ---------- helpers ----------
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmtUptime = (s) => {
+    if (!s) return "";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h}h ${m}m` : m ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`;
+  };
+  const fmtMB = (b) => (b / 1048576 >= 10 ? (b / 1048576).toFixed(0) : (b / 1048576).toFixed(1)) + " MB";
+
+  // The API only accepts same-origin requests (no CORS, on purpose). If this file was
+  // opened directly from disk, go to the server's address instead of failing.
+  if (!location.protocol.startsWith("http")) {
+    location.replace("http://127.0.0.1:8080/");
+    return;
+  }
+  const API_BASE = "";
+
+  async function api(method, path, body, signal) {
+    const opts = { method, headers: {}, signal };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(API_BASE + path, opts);
+    let data = {};
+    try { data = await res.json(); } catch (_) { /* empty body */ }
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  }
+
+  function toast(msg, bad = false) {
+    const el = document.createElement("div");
+    el.className = "toast" + (bad ? " bad" : "");
+    el.textContent = msg;
+    $("#toasts").appendChild(el);
+    setTimeout(() => el.remove(), bad ? 5000 : 2600);
+  }
+
+  // Debounce per key so slider drags send one request at the end.
+  const timers = {};
+  function debounce(key, ms, fn) {
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(fn, ms);
+  }
+
+  // ---------- state ----------
+  let status = null;
+  let config = null;
+  let outputs = [];
+  let dirty = false;
+  let lastBytes = null, lastAt = null;
+  const history = [];          // kbps samples, one per poll
+  const HISTORY = 60;
+  let peak = 0;
+  const cards = new Map();     // match -> element
+
+  // ---------- rendering: header ----------
+  function renderHeader() {
+    const s = status;
+    const pill = $("#statePill");
+    const txt = $("#stateText");
+    const btn = $("#toggleBtn");
+    pill.className = "pill";
+    if (!s) {
+      pill.classList.add("offline");
+      txt.textContent = "Offline";
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+    if (s.state === "running") {
+      pill.classList.add("running");
+      const sp = s.spotify;
+      txt.textContent = !sp ? "Running"
+        : sp.state === "active" ? (sp.playing ? "Playing" : "Paused")
+        : sp.state === "ready" ? "Connected"
+        : sp.state === "connecting" ? "Connecting"
+        : "Waiting for Spotify";
+      btn.textContent = "Stop";
+      btn.className = "btn danger";
+      btn.dataset.action = "stop";
+    } else if (s.state === "error") {
+      pill.classList.add("error");
+      txt.textContent = "Error";
+      btn.textContent = "Start";
+      btn.className = "btn";
+      btn.dataset.action = "start";
+    } else {
+      txt.textContent = "Stopped";
+      btn.textContent = "Start";
+      btn.className = "btn";
+      btn.dataset.action = "start";
+    }
+    $("#deviceName").textContent = s.device_name;
+    $("#brandSub").textContent = s.device_name;
+    const banner = $("#banner");
+    const spotifyError = s.spotify && s.spotify.error;
+    if (s.last_error) {
+      banner.classList.remove("hidden", "info");
+      $("#bannerText").textContent = s.last_error;
+    } else if (spotifyError) {
+      banner.classList.remove("hidden");
+      banner.classList.add("info");
+      $("#bannerText").textContent = spotifyError;
+    } else {
+      banner.classList.add("hidden");
+    }
+    renderSpotify();
+  }
+
+  // ---------- rendering: Spotify connection and now playing ----------
+  const fmtTime = (ms) => {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  };
+  const PLAY_PATH = "M7 4v16l13-8z";
+  const PAUSE_PATH = "M6 4h4v16H6zM14 4h4v16h-4z";
+
+  function renderSpotify() {
+    const s = status;
+    const sp = s.spotify;
+    const hint = $("#deviceHint");
+    const now = $("#now");
+    if (s.state !== "running") {
+      hint.textContent = "Press Start to make this device visible in Spotify";
+    } else if (!sp) {
+      hint.textContent = "Visible in Spotify as a Connect device";
+    } else if (sp.state === "connecting") {
+      hint.textContent = "Connecting to Spotify…";
+    } else if (sp.state === "ready") {
+      hint.textContent = `Signed in as ${sp.username}. Choose “${s.device_name}” in Spotify to play.`;
+    } else if (sp.state === "active") {
+      hint.textContent = `Playing from ${sp.username}’s Spotify`;
+    } else {
+      hint.textContent = `Open Spotify on this network and choose “${s.device_name}” as the device`;
+    }
+
+    const track = sp && sp.track;
+    now.classList.toggle("hidden", !track);
+    if (!track) return;
+    $("#nowTitle").textContent = track.name || "Unknown title";
+    const by = (track.artists || []).join(", ");
+    $("#nowSub").textContent = [by, track.album].filter(Boolean).join(" — ");
+    const duration = track.duration_ms || 0;
+    const position = Math.min(sp.position_ms || 0, duration || Infinity);
+    $("#nowPos").textContent = fmtTime(position);
+    $("#nowDur").textContent = fmtTime(duration);
+    $("#nowQuality").textContent = track.bitrate ? `${track.codec} ${track.bitrate} kbps` : "";
+    $("#nowBar").style.width = duration ? `${(position / duration) * 100}%` : "0";
+    $("#playIcon").firstElementChild.setAttribute("d", sp.playing ? PAUSE_PATH : PLAY_PATH);
+    $("#playBtn").dataset.action = sp.playing ? "pause" : "play";
+    $("#playBtn").setAttribute("aria-label", sp.playing ? "Pause" : "Play");
+  }
+
+  // ---------- rendering: monitor ----------
+  function renderMonitor(now) {
+    const s = status;
+    const connected = s.speakers.filter((x) => x.connected).length;
+    $("#speakerCount").textContent = `${connected} / ${s.speakers.length}`;
+    $("#uptimeTag").textContent = s.state === "running" ? `Up ${fmtUptime(s.uptime_s)}` : "Not streaming";
+    $("#received").textContent = fmtMB(s.bytes_in || 0);
+
+    let kbps = 0;
+    if (lastBytes !== null && lastAt !== null && s.bytes_in >= lastBytes) {
+      const dt = (now - lastAt) / 1000;
+      if (dt > 0) kbps = ((s.bytes_in - lastBytes) * 8) / 1000 / dt;
+    }
+    lastBytes = s.bytes_in;
+    lastAt = now;
+    if (s.state !== "running") kbps = 0;
+    history.push(kbps);
+    if (history.length > HISTORY) history.shift();
+    peak = Math.max(peak * 0.995, kbps);
+    $("#kbps").textContent = `${Math.round(kbps)} kbps`;
+    $("#peak").textContent = `peak ${Math.round(peak)} kbps`;
+    drawSpark();
+  }
+
+  function drawSpark() {
+    const W = 600, H = 72, pad = 4;
+    const max = Math.max(320, ...history) * 1.1;
+    const n = history.length;
+    const pts = history.map((v, i) => {
+      const x = n <= 1 ? W : (i / (HISTORY - 1)) * W;
+      const y = H - pad - (v / max) * (H - pad * 2);
+      return [x, y];
+    });
+    if (!pts.length) return;
+    const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const last = pts[pts.length - 1];
+    $("#sparkLine").setAttribute("d", line);
+    $("#sparkArea").setAttribute("d", `${line} L${last[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`);
+  }
+
+  // ---------- rendering: speakers ----------
+  function speakerCardHTML(sp) {
+    return `
+      <div class="speaker-head">
+        <div class="avatar"></div>
+        <div class="meta">
+          <div class="speaker-name"></div>
+          <div class="speaker-sub"></div>
+        </div>
+        <button class="mute" aria-label="Mute"></button>
+      </div>
+      <div class="row">
+        <span class="label">Volume</span>
+        <input type="range" class="grow vol" min="0" max="100" step="1" aria-label="Volume">
+        <span class="value-tag vol-val"></span>
+      </div>
+      <div class="row">
+        <span class="label">Delay</span>
+        <div class="grow"></div>
+        <div class="stepper">
+          <button class="dec" aria-label="Less delay">−</button>
+          <span class="delay-val"></span>
+          <button class="inc" aria-label="More delay">+</button>
+        </div>
+      </div>
+      <div class="bufbar"><i></i></div>
+      <div class="metrics">
+        <div>Latency<b class="m-lat">–</b></div>
+        <div>Buffer<b class="m-buf">–</b></div>
+        <div>Underruns<b class="m-und">–</b></div>
+      </div>
+      <div class="speaker-foot">
+        <span class="note"></span>
+        <button class="link remove">Remove</button>
+      </div>`;
+  }
+
+  function updateCard(el, sp) {
+    const live = sp.connected;
+    const avatar = $(".avatar", el);
+    avatar.className = "avatar" + (live ? "" : " off");
+    avatar.innerHTML = ICON.speaker;
+    $(".speaker-name", el).textContent = sp.match;
+    const sub = $(".speaker-sub", el);
+    sub.textContent = live ? `${sp.device_name} · ${sp.hostapi}` : (sp.note || "Not connected");
+    const mute = $(".mute", el);
+    mute.className = "mute" + (sp.muted ? " on" : "");
+    mute.innerHTML = sp.muted ? ICON.volOff : ICON.volOn;
+    mute.setAttribute("aria-pressed", String(sp.muted));
+    mute.setAttribute("aria-label", sp.muted ? `Unmute ${sp.match}` : `Mute ${sp.match}`);
+    mute.dataset.muted = sp.muted ? "1" : "0";
+
+    const vol = $(".vol", el);
+    if (document.activeElement !== vol) {
+      vol.value = Math.round(sp.volume * 100);
+      vol.style.setProperty("--p", `${Math.round(sp.volume * 100)}%`);
+      $(".vol-val", el).textContent = `${Math.round(sp.volume * 100)}%`;
+    }
+    $(".delay-val", el).textContent = `${Math.round(sp.delay_ms)} ms`;
+    $(".m-lat", el).textContent = live ? `${Math.round(sp.latency_ms)} ms` : "–";
+    $(".m-buf", el).textContent = live ? `${Math.round(sp.buffered_ms)} ms` : "–";
+    $(".m-und", el).textContent = live ? String(sp.underruns) : "–";
+    const bar = $(".bufbar > i", el);
+    const bufferMs = (config?.buffer_seconds || 2) * 1000;
+    const pct = live ? Math.min(100, (sp.buffered_ms / bufferMs) * 100) : 0;
+    bar.style.width = pct + "%";
+    bar.style.background = sp.underruns > 0 && live && sp.underruns > (el.dataset.und || 0) ? "var(--orange)" : "var(--green)";
+    el.dataset.und = sp.underruns || 0;
+    $(".note", el).textContent = live && sp.muted ? "Muted" : "";
+  }
+
+  function renderSpeakers() {
+    const list = status.speakers;
+    const box = $("#speakers");
+    $("#noSpeakers").classList.toggle("hidden", list.length > 0);
+    const seen = new Set();
+    for (const sp of list) {
+      seen.add(sp.match);
+      let el = cards.get(sp.match);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "card speaker";
+        el.dataset.match = sp.match;
+        el.innerHTML = speakerCardHTML(sp);
+        wireCard(el, sp.match);
+        cards.set(sp.match, el);
+        box.appendChild(el);
+      }
+      el.dataset.delay = sp.delay_ms;
+      updateCard(el, sp);
+    }
+    for (const [match, el] of cards) {
+      if (!seen.has(match)) { el.remove(); cards.delete(match); }
+    }
+    // keep order from config
+    for (const sp of list) box.appendChild(cards.get(sp.match));
+  }
+
+  function wireCard(el, match) {
+    const vol = $(".vol", el);
+    vol.addEventListener("input", () => {
+      vol.style.setProperty("--p", vol.value + "%");
+      $(".vol-val", el).textContent = vol.value + "%";
+    });
+    vol.addEventListener("change", () => {
+      patchSpeaker(match, { volume: vol.value / 100 });
+    });
+    $(".mute", el).addEventListener("click", (e) => {
+      const muted = e.currentTarget.dataset.muted !== "1";
+      patchSpeaker(match, { muted });
+    });
+    const delayOf = () => Number(el.dataset.delay || 0);
+    $(".dec", el).addEventListener("click", () => setDelay(match, delayOf() - 10));
+    $(".inc", el).addEventListener("click", () => setDelay(match, delayOf() + 10));
+    $(".remove", el).addEventListener("click", () => removeSpeaker(match));
+  }
+
+  function setDelay(match, ms) {
+    ms = Math.max(0, Math.min(5000, ms));
+    const el = cards.get(match);
+    if (el) { el.dataset.delay = ms; $(".delay-val", el).textContent = `${ms} ms`; }
+    debounce("delay:" + match, 500, () => patchSpeaker(match, { delay_ms: ms }, "Delay applied, stream restarted"));
+  }
+
+  async function patchSpeaker(match, changes, okMsg) {
+    try {
+      const res = await api("PATCH", "/api/speaker", { match, ...changes });
+      status = res.status;
+      renderAll(true);
+      if (okMsg) toast(okMsg);
+    } catch (err) {
+      toast(err.message, true);
+      poll();
+    }
+  }
+
+  async function removeSpeaker(match) {
+    if (!confirm(`Remove “${match}” from the speakers?`)) return;
+    const speakers = liveSpeakers().filter((s) => s.match !== match);
+    await saveConfig({ ...config, speakers }, "Speaker removed");
+  }
+
+  // Speaker settings as the engine currently has them (volume/mute can change live).
+  function liveSpeakers() {
+    return (status?.speakers || []).map((s) => ({ match: s.match, delay_ms: s.delay_ms, volume: s.volume, muted: s.muted }));
+  }
+
+  // ---------- rendering: outputs ----------
+  function renderOutputs() {
+    const box = $("#outputs");
+    const configured = new Set((config?.speakers || []).map((s) => s.match.toLowerCase()));
+    const list = outputs.filter((o) => o.hostapi === "Windows WASAPI");
+    const shown = list.length ? list : outputs;
+    if (!shown.length) {
+      box.innerHTML = '<div class="empty">No audio devices found. Pair your Bluetooth speakers in Windows, then refresh.</div>';
+      return;
+    }
+    box.innerHTML = shown.map((o) => {
+      const added = [...configured].some((m) => o.name.toLowerCase().includes(m));
+      return `<div class="output">
+        <div class="k"><b>${esc(o.name)}</b><small>${esc(o.hostapi)}</small></div>
+        ${added
+          ? '<span class="status-tag">Added</span>'
+          : `<button class="btn small" data-add="${esc(o.name)}">${ICON.plus.replace("<svg", '<svg width="12" height="12" style="vertical-align:-1px;margin-right:4px"')}Add</button>`}
+      </div>`;
+    }).join("");
+    box.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => addSpeaker(b.dataset.add)));
+  }
+
+  async function addSpeaker(name) {
+    const speakers = [...liveSpeakers(), { match: name, delay_ms: 0, volume: 1, muted: false }];
+    await saveConfig({ ...config, speakers }, "Speaker added");
+    loadOutputs();
+  }
+
+  async function loadOutputs() {
+    try {
+      const res = await api("GET", "/api/outputs");
+      outputs = res.outputs;
+      renderOutputs();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  // ---------- settings form ----------
+  const F = {
+    device_name: $("#f_device_name"),
+    buffer_seconds: $("#f_buffer_seconds"),
+    auto_latency_compensation: $("#f_auto_latency"),
+    autostart: $("#f_autostart"),
+    librespot_path: $("#f_librespot_path"),
+    cache_dir: $("#f_cache_dir"),
+    web_host: $("#f_web_host"),
+    web_port: $("#f_web_port"),
+  };
+  let bitrate = 320;
+  let receiver = "builtin";
+
+  function fillForm(cfg) {
+    F.device_name.value = cfg.device_name;
+    F.buffer_seconds.value = cfg.buffer_seconds;
+    $("#f_buffer_val").textContent = Number(cfg.buffer_seconds).toFixed(1) + " s";
+    F.buffer_seconds.style.setProperty("--p", ((cfg.buffer_seconds - 0.5) / 9.5 * 100) + "%");
+    F.auto_latency_compensation.checked = cfg.auto_latency_compensation;
+    F.autostart.checked = cfg.autostart;
+    F.librespot_path.value = cfg.librespot_path || "";
+    F.cache_dir.value = cfg.cache_dir || "";
+    F.web_host.value = cfg.web_host || "";
+    F.web_port.value = cfg.web_port || 8080;
+    bitrate = cfg.bitrate;
+    setSeg(bitrate);
+    receiver = cfg.receiver || "builtin";
+    setReceiver(receiver);
+    setDirty(false);
+  }
+
+  function setSeg(v) {
+    document.querySelectorAll("#f_bitrate button").forEach((b) => b.classList.toggle("active", Number(b.dataset.v) === Number(v)));
+  }
+
+  function setReceiver(v) {
+    document.querySelectorAll("#f_receiver button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
+    document.querySelectorAll(".librespot-only").forEach((el) => el.classList.toggle("hidden", v !== "librespot"));
+  }
+
+  function readForm() {
+    return {
+      ...config,
+      device_name: F.device_name.value.trim() || "Bluetooth Splitter",
+      bitrate,
+      receiver,
+      buffer_seconds: Number(F.buffer_seconds.value),
+      auto_latency_compensation: F.auto_latency_compensation.checked,
+      autostart: F.autostart.checked,
+      librespot_path: F.librespot_path.value.trim() || "librespot",
+      cache_dir: F.cache_dir.value.trim() || null,
+      web_host: F.web_host.value.trim() || "127.0.0.1",
+      web_port: Number(F.web_port.value) || 8080,
+      // Use live speaker values so a stale copy never overwrites a newer volume.
+      speakers: liveSpeakers(),
+    };
+  }
+
+  function setDirty(v) {
+    dirty = v;
+    $("#savebar").classList.toggle("show", v);
+  }
+
+  Object.values(F).forEach((el) => el.addEventListener("input", () => {
+    if (el === F.buffer_seconds) {
+      $("#f_buffer_val").textContent = Number(F.buffer_seconds.value).toFixed(1) + " s";
+      F.buffer_seconds.style.setProperty("--p", ((F.buffer_seconds.value - 0.5) / 9.5 * 100) + "%");
+    }
+    setDirty(true);
+  }));
+  Object.values(F).forEach((el) => el.addEventListener("change", () => setDirty(true)));
+  document.querySelectorAll("#f_bitrate button").forEach((b) => b.addEventListener("click", () => {
+    bitrate = Number(b.dataset.v);
+    setSeg(bitrate);
+    setDirty(true);
+  }));
+  document.querySelectorAll("#f_receiver button").forEach((b) => b.addEventListener("click", () => {
+    receiver = b.dataset.v;
+    setReceiver(receiver);
+    setDirty(true);
+  }));
+
+  async function saveConfig(cfg, okMsg = "Settings saved") {
+    try {
+      const res = await api("PUT", "/api/config", cfg);
+      config = res.config;
+      status = res.status;
+      fillForm(config);
+      renderAll(true);
+      toast(okMsg);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  $("#saveBtn").addEventListener("click", () => saveConfig(readForm()));
+  $("#discardBtn").addEventListener("click", () => fillForm(config));
+
+  // ---------- controls ----------
+  $("#toggleBtn").addEventListener("click", async () => {
+    const action = $("#toggleBtn").dataset.action || "start";
+    await control(action);
+  });
+  $("#restartBtn").addEventListener("click", () => control("restart"));
+  $("#scanBtn").addEventListener("click", () => { loadOutputs(); toast("Devices refreshed"); });
+
+  // Transport controls act on the Spotify session; the next poll shows the result.
+  async function transport(action) {
+    try {
+      await api("POST", "/api/control", { action });
+      setTimeout(poll, 250);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+  $("#playBtn").addEventListener("click", () => transport($("#playBtn").dataset.action || "play"));
+  $("#prevBtn").addEventListener("click", () => transport("prev"));
+  $("#nextBtn").addEventListener("click", () => transport("next"));
+
+  async function control(action) {
+    const btn = $("#toggleBtn");
+    btn.disabled = true;
+    try {
+      const res = await api("POST", "/api/control", { action });
+      status = res.status;
+      renderAll(true);
+      toast({ start: "Streaming started", stop: "Streaming stopped", restart: "Restarted" }[action]);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ---------- main loop ----------
+  function renderAll(now = false) {
+    if (!status) return;
+    renderHeader();
+    renderMonitor(Date.now());
+    renderSpeakers();
+    $("#speakerCount").textContent = `${status.speakers.filter((x) => x.connected).length} / ${status.speakers.length}`;
+  }
+
+  // Only a failed request shows "offline". Render errors are logged, not hidden.
+  let polling = false;
+  async function poll() {
+    if (polling) return;           // skip if the previous poll is still waiting
+    polling = true;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    let data;
+    try {
+      data = await api("GET", "/api/status", undefined, ctrl.signal);
+    } catch (err) {
+      console.warn("status poll failed:", err);
+      document.body.classList.add("offline");
+      $("#statePill").className = "pill offline";
+      $("#stateText").textContent = "Offline";
+      $("#toggleBtn").disabled = true;
+      return;
+    } finally {
+      clearTimeout(timer);
+      polling = false;
+    }
+    status = data;
+    document.body.classList.remove("offline");
+    try {
+      renderAll();
+    } catch (err) {
+      console.error("render failed:", err);
+    }
+  }
+
+  async function init() {
+    try {
+      config = await api("GET", "/api/config");
+      fillForm(config);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    await loadOutputs();
+    await poll();
+    setInterval(poll, 1000);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+config.json
+.librespot-cache/
+# saved Spotify login of the built-in receiver (a credential: never commit)
+.spconnect-state.json
+.spconnect-state.json.tmp
+tools/
