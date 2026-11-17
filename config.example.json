@@ -1,0 +1,11 @@
+{
+  "device_name": "Bluetooth Splitter",
+  "receiver": "builtin",
+  "bitrate": 320,
+  "buffer_seconds": 2.0,
+  "auto_latency_compensation": true,
+  "autostart": true,
+  "web_host": "127.0.0.1",
+  "web_port": 8080,
+  "speakers": []
+}
