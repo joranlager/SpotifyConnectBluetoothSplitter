@@ -1,35 +1,27 @@
 # SpotifyConnectBluetoothSplitter
 
-A Python app that makes your PC a **Spotify Connect** device and plays the
-same music on **several Bluetooth speakers at once**.
+A Python app that plays the same music on **several Bluetooth speakers at once**,
+using one of **Spotify's own clients** as the Spotify Connect device.
 
-It has three ways to receive Spotify (set `receiver` in the config):
+It has two ways to receive Spotify (set `receiver` in the config):
 
-- **`soloist`** — Spotify's official headless Connect client. Works on every
-  Premium account. The app runs it, listens to what it plays on this PC and
-  sends that to your speakers. See [Using Soloist](#using-soloist).
-- **`builtin`** — a Spotify Connect receiver written in Python (`spconnect/`).
-  No extra install, but Spotify refuses it the audio keys on some accounts.
-- **`librespot`** — an external librespot program.
+- **`soloist`** — Spotify's official headless Connect client (Windows or Linux).
+  The app runs it, listens to what it plays on this PC and sends that to your
+  speakers. See [Using Soloist](#using-soloist).
+- **`headless`** — Spotify's *official desktop client* run headless on Linux
+  x86_64 by the Rust tool in [`headless/`](headless/). The app reads the decoded
+  PCM from the tool's stdout and the web UI handles the one-time sign-in. See
+  [Official Spotify client on Linux](#official-spotify-client-on-linux-spotify-headless).
 
-On Linux x86_64 there is also [`headless/`](headless/): **spotify-headless**, a
-Rust tool that runs the *official Spotify desktop client* headless and exposes
-its audio as PCM. See [Official Spotify client on Linux](#official-spotify-client-on-linux-spotify-headless).
-
-The app itself (`splitter/`) copies the audio to one buffer per speaker, keeps
-the speakers aligned, and serves a web UI to control it. The built-in receiver
-is:
-
-- **`spconnect/`** — a Spotify Connect receiver written in Python. It appears in
-  Spotify's device list, takes play/pause/skip/seek/queue/volume commands, and
-  downloads, decrypts and decodes the audio. No external program is needed.
-- **`splitter/`** — the app: it copies the decoded audio to one buffer per
-  speaker, keeps the speakers aligned, and serves a web UI to control it.
+The app (`splitter/`) copies the sound to one buffer per speaker, keeps the
+speakers aligned, and serves a web UI to control it. It does not speak Spotify's
+protocol, decrypt or decode Spotify audio: the Spotify client does all of that
+and we only route the sound it plays. See [Spotify's terms](#spotifys-terms).
 
 ```
-Spotify app ──Connect──> spconnect (receiver + decoder) ──PCM──> FanOut ──┬──> buffer -> speaker 1
-                                                                          ├──> buffer -> speaker 2
-                                                                          └──> buffer -> ...
+Spotify app ──Connect──> official Spotify client ──sound──> FanOut ──┬──> buffer -> speaker 1
+                         (Soloist or desktop client)                 ├──> buffer -> speaker 2
+                                                                     └──> buffer -> ...
 ```
 
 ## Requirements
@@ -145,20 +137,47 @@ phone ──Connect──> official Spotify client ──> virtual sink ──mo
 - optionally runs x11vnc on the loopback, so you can sign in once,
 - keeps everything running and restarts it with a backoff.
 
-```bash
-cd headless
-cargo build --release
-./target/release/spotify-headless doctor --pcm-out - --vnc-port 5900   # check the board
-./target/release/spotify-headless run --data-dir ~/.local/share/spotify-headless --pcm-out /run/user/1000/spotify.pcm
-```
+### Use it from the splitter
 
-Full instructions (first login over VNC, options, a systemd unit) are in
+1. Build the tool and install Spotify, Xvfb, `pactl`/`parec` and `x11vnc`:
+
+   ```bash
+   sudo apt install xvfb pulseaudio-utils x11vnc
+   cd headless && cargo build --release
+   ```
+
+2. In `config.json` set `"receiver": "headless"` (or pick **Spotify client**
+   under *Advanced* in the web UI and save). The app finds the tool in
+   `headless/target/release` next to the config, in `tools/spotify-headless`, or
+   on the `PATH`.
+3. Open the web UI. The **Spotify client setup** card checks that the tool,
+   the Spotify client and a saved login are there. Press **Start setup**: the
+   app starts the client on a virtual display with a VNC server that listens on
+   this machine only. The card shows the exact SSH tunnel command (for example
+   `ssh -L 5900:127.0.0.1:5900 you@board`); connect a VNC viewer to
+   `localhost:5900`, sign in to Spotify in the window, then press **Finish
+   setup**. The login is saved in `.spotify-headless-data` next to the config
+   (it is a credential: git ignores it, do not share it).
+4. Press **Start**. The app runs `spotify-headless run --pcm-out -`, reads the
+   PCM (s16le, stereo, 44.1 kHz) from its stdout and fans it out to the
+   speakers. In Spotify, choose this computer, listed under its host name (the
+   client picks that name itself, so the *Device name* setting does not apply).
+
+Setup and streaming cannot run at the same time (they share the client's
+config folder): the app asks you to stop one before starting the other. If the
+account has no password, set one on spotify.com first, because the client's
+browser sign-in cannot open on a machine without a browser. The "saved login"
+check is a best guess from the files the client writes.
+
+Full instructions for the tool itself (options, a systemd unit) are in
 [headless/README.md](headless/README.md).
 
-**Status:** the logic is unit-tested and the Linux code type-checks, but the
-whole chain has not been run yet against a real Spotify client. The Python
-splitter does not read this PCM on Linux yet: its capture is still Windows
-WASAPI loopback.
+**Status:** the logic is unit-tested (including the splitter side, with a stub
+standing in for the tool) and the Linux code type-checks, but the whole chain
+has not been run yet against a real Spotify client on Linux. The speaker
+outputs on Linux are also untested: this app picks Bluetooth speakers through
+PortAudio devices, which on Linux exposes ALSA devices and not each Bluetooth
+speaker separately.
 
 ## Run
 
@@ -169,15 +188,13 @@ python -m splitter run --config config.json
 Then:
 
 1. Open **http://localhost:8080** and add your speakers from *Available devices*.
-2. Press **Start**. The first time, Windows Firewall asks whether Python may
+2. Press **Start**. The first time, Windows Firewall may ask whether Soloist may
    accept connections: allow it on private networks, or Spotify cannot find the
    device.
 3. In Spotify (phone or PC, on the same network), open the device picker and
-   choose **Bluetooth Splitter**.
+   choose **Bluetooth Splitter** (with the `headless` receiver: this computer's
+   host name).
 
-After the first time, the app stays signed in: it saves a login token in
-`.spconnect-state.json` next to the config file. Treat that file like a
-password and do not share or commit it (it is in `.gitignore`).
 
 Options: `--host 0.0.0.0` and `--port 8080` override the web settings,
 `--no-web` runs without the web UI, and `--name` overrides `device_name`.
@@ -185,15 +202,16 @@ Options: `--host 0.0.0.0` and `--port 8080` override the web settings,
 
 ## Web UI
 
-- **Control**: start, stop or restart the device; play, pause, next and previous.
-- **Monitor**: what is playing and its position, throughput history, and per
+- **Control**: start, stop or restart the device.
+- **Monitor**: whether sound is playing, throughput history, and per
   speaker latency, buffer level and underruns.
 - **Speakers**: per-speaker volume, mute and delay, all live (nothing restarts,
   so Spotify keeps playing). The delay has -10/-1/+1/+10 ms buttons and an
   editable field. Press **Sync test** to play a click every second on every
   speaker for 10 seconds. Add speakers from the detected devices list, or remove them.
-- **Settings**: device name, quality, buffer, speaker alignment, autostart and
-  advanced options. Changes are saved to `config.json`; the stream restarts if
+- **Settings**: device name, buffer, speaker alignment, autostart and
+  advanced options (the receiver and its paths). With the `headless` receiver
+  there is also the **Spotify client setup** card for the one-time sign-in. Changes are saved to `config.json`; the stream restarts if
   it is running.
 
 The UI is one file served by the app, with no external dependencies. The web
@@ -205,11 +223,13 @@ no login, so do that only on a trusted network.
 
 | Method | Path | Body |
 | --- | --- | --- |
-| GET | `/api/status` | Live state, now playing and per-speaker metrics |
+| GET | `/api/status` | Live state and per-speaker metrics |
 | GET | `/api/outputs` | Audio devices visible to Windows |
 | GET / PUT | `/api/config` | Read or replace the configuration (saved to disk) |
-| POST | `/api/control` | `{"action": "start" \| "stop" \| "restart" \| "play" \| "pause" \| "next" \| "prev"}` |
+| POST | `/api/control` | `{"action": "start" \| "stop" \| "restart" \| "sync_test"}` |
 | PATCH | `/api/speaker` | `{"match": "...", "volume"?, "muted"?, "delay_ms"?}` |
+| GET | `/api/setup` | State of the Spotify client setup (`headless` receiver) |
+| POST | `/api/setup` | `{"action": "start" \| "stop"}`: the one-time sign-in session |
 
 Requests that change state must send `Content-Type: application/json`.
 
@@ -218,10 +238,13 @@ Requests that change state must send `Content-Type: application/json`.
 | Key | Meaning |
 | --- | --- |
 | `device_name` | Name shown in Spotify's device list |
-| `receiver` | `soloist`, `builtin` (the Python receiver) or `librespot` (external program) |
+| `receiver` | `soloist` or `headless` (official desktop client via spotify-headless, Linux). Default: `headless` on Linux, else `soloist`. The old `builtin` and `librespot` values were removed |
+| `headless_path`, `headless_args` | The spotify-headless executable (also looked for in `headless/target/release` and `tools/spotify-headless`); extra flags for it |
+| `spotify_bin` | The official Spotify executable that spotify-headless runs (default `spotify`) |
+| `headless_data_dir` | Folder for the client's config (its saved login), cache and logs; default `.spotify-headless-data` next to the config |
+| `headless_vnc_port` | Loopback port of the setup session's VNC server (default 5900) |
 | `soloist_path` | Soloist executable (also looked for in `tools/soloist`); `soloist_args` adds flags |
 | `soloist_api_key_file` | File holding the Soloist API key (default `.soloist-api-key`); `SOLOIST_API_KEY` wins |
-| `bitrate` | 96, 160 or 320 kbit/s |
 | `buffer_seconds` | Largest per-speaker buffer before old audio is dropped |
 | `auto_latency_compensation` | Delays faster speakers so all speakers line up |
 | `autostart` | Start the device when the app launches |
@@ -230,22 +253,21 @@ Requests that change state must send `Content-Type: application/json`.
 | `speakers[].delay_ms` | Manual extra delay for one speaker (fine-tune by ear) |
 | `speakers[].volume` | 0.0–1.0 per-speaker volume, set live from the UI |
 | `speakers[].muted` | Mute state, set live from the UI |
-| `librespot_path`, `librespot_args`, `cache_dir` | Only for `receiver: "librespot"` |
 
-Settings that are credentials (the Soloist key, the saved Spotify login) are never
-stored in `config.json`.
+Settings that are credentials (the Soloist key, the Spotify client's saved login) are never
+stored in `config.json`. Streaming quality is set in the Spotify client itself. Keys from
+earlier versions (`bitrate`, `librespot_*`, `cache_dir`) are ignored.
 
 ## How the sync works
 
-- All speakers receive identical PCM (16-bit stereo; 44.1 kHz from the built-in
-  receiver and librespot, the default output's rate with Soloist).
+- All speakers receive identical PCM (16-bit stereo; 44.1 kHz from the `headless`
+  receiver, the default output's rate with Soloist).
 - Each speaker's output runs on its own realtime stream fed from its own buffer.
-- The built-in receiver decodes only as fast as the speakers consume, keeping
-  about a quarter of a second queued, so the stream cannot drift away from the
-  outputs. With Soloist, the sound arrives in real time from the capture.
+- The sound arrives in real time from the Spotify client (captured from the
+  default output with Soloist, or from the virtual sink with `headless`).
 - Bluetooth latency differs per speaker. With `auto_latency_compensation`, the
   app reads each stream's reported latency and gives the faster speakers a head
-  of silence. That lead is restored after every pause, seek and track change.
+  of silence. That lead is restored after every pause and gap in the stream.
   Reported latency for Bluetooth is often approximate, so if you hear an echo,
   adjust `delay_ms` for the speaker that is early.
 - **Syncing by ear**: Windows reports the same latency for most Bluetooth
@@ -259,55 +281,36 @@ stored in `config.json`.
   plays silence. Other speakers are never blocked.
 - A speaker that is off or unavailable at startup is skipped with a warning.
 
-## The spconnect library
+## Spotify's terms
 
-`spconnect` can be used on its own:
-
-```python
-from spconnect import Receiver, ReceiverConfig, NullSink
-
-receiver = Receiver(ReceiverConfig(device_name="Living Room", state_path="state.json"), NullSink())
-receiver.start()            # now visible in Spotify's device picker
-...
-receiver.stop()
-```
-
-Audio goes to a *sink*: any object with `write(pcm_bytes)`, `pending_ms()` and
-`flush()`. `NullSink` discards it in real time.
-
-What it implements: zeroconf discovery and login, the access point connection
-(Diffie-Hellman handshake, Shannon cipher), client and access tokens, the dealer
-websocket, Connect state (transfer, play, pause, seek, next/previous, queue,
-shuffle, repeat, volume, autoplay), track metadata, audio keys, CDN download,
-AES decryption, Ogg Vorbis decoding, loudness normalisation and gapless track
-changes.
-
-It is pure Python. Its dependencies are ordinary pip packages; three of them
-ship compiled code (`cryptography` for AES, `soundfile` for Vorbis decoding,
-`numpy`). There is no pure-Python Vorbis decoder fast enough to play in real time.
-
-See [spconnect/NOTICE.md](spconnect/NOTICE.md) for the origin of the protocol
-definitions and the licence of the code this is derived from.
+- This app does **not** implement Spotify's protocol, decrypt, decode or
+  otherwise get around Spotify's protections. Earlier versions had such
+  receivers (a Python Connect receiver and librespot support); they were
+  removed so that only Spotify's own clients remain.
+- It runs a Spotify-made client (Soloist or the official desktop client) and
+  routes the sound that client plays, the way a mixer app would. You need a
+  Premium account, and you are bound by Spotify's
+  [User Agreement](https://www.spotify.com/legal/end-user-agreement/) and, for
+  Soloist, the terms you accept when you create its API key.
+- Use it for your own listening. Do not record, redistribute or share what the
+  speakers play.
+- Running the desktop client unattended on a virtual display is not a setup that
+  Spotify documents. This README is not legal advice: read the terms yourself
+  and decide whether your use fits them.
 
 ## Known limitations
 
-- **The built-in receiver can be refused.** Spotify has started withholding audio
-  keys from the older access method that open-source players use, for some
-  accounts (it wants its PlayPlay DRM). The log then shows
-  `access point refused the audio key`. The same happens in librespot and
-  go-librespot ([#1649](https://github.com/librespot-org/librespot/issues/1649),
-  [#279](https://github.com/devgianlu/go-librespot/issues/279)). Use `soloist`.
-- **Soloist needs a Windows PC (or a Linux machine) and its own API key.** It has
-  no phone or Pi-specific limits, but this app's loopback capture is Windows only.
-
+- **Soloist needs its own API key** and builds that expire after 90 days. The
+  loopback capture this app uses for Soloist is Windows only; on Linux use the
+  `headless` receiver.
+- **The `headless` receiver is untested on a real Linux machine so far**, and the
+  speaker outputs on Linux are untested too (see above).
 - **Sync is approximate**, usually within tens of milliseconds, but Bluetooth
   does not expose exact timing. Expect a small echo on some speaker pairs.
 - **Speaker drop-outs** on Bluetooth are not auto-reconnected; press Restart
   after reconnecting a speaker.
-- Podcasts in formats other than Ogg Vorbis or MP3, local files and videos are
-  skipped. Jam sessions and the DJ are not supported.
-- The receiver uses reverse-engineered protocols. Spotify can change them at any
-  time, and using it may be against Spotify's terms of service.
+- The transport controls and now-playing display in the web UI are not used by
+  the two official clients (they show nothing).
 
 ## Development
 
@@ -316,11 +319,9 @@ pip install pytest
 pytest
 ```
 
-The tests need no Spotify account, network or speakers. They cover the cipher,
-login blob handling, audio download/decrypt/decode, the Connect state machine,
-the player, discovery, command handling, the fan-out and the web API.
+The tests need no Spotify account, network or speakers. They cover the config,
+the Soloist and spotify-headless sources (with stand-in programs), the engine,
+the fan-out, the sync test and the web API.
 
-- `scripts/gen_proto.py` regenerates `spconnect/proto/*_pb2.py` from a librespot
-  checkout.
 - The web UI is a single file, `splitter/web/index.html` (plain HTML, CSS and
   JS, no build step). The server reads it on each page load.

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .config import SAMPLE_RATE, AppConfig, SpeakerConfig, bytes_per_second, save_config
 from .fanout import FanOut
-from .librespot import LibrespotSource, build_command
+from .headless import HeadlessSetup
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class _Runtime:
 @dataclass
 class _State:
     fan: FanOut | None = None
-    source: object | None = None  # LibrespotSource, BuiltinSource or SoloistSource
+    source: object | None = None  # SoloistSource or HeadlessSource
     rate: int = SAMPLE_RATE  # sample rate of the audio flowing through the fan-out
     speakers: list[_Runtime] = field(default_factory=list)
     started_at: float | None = None
@@ -65,6 +65,7 @@ class Engine:
         self._skipped: dict[str, str] = {}  # match -> reason, from the last start
         self._sync_stop = threading.Event()
         self._sync_thread: threading.Thread | None = None
+        self._setup = HeadlessSetup()
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -92,13 +93,17 @@ class Engine:
             cfg = self._cfg
             self._st = _State()
             self._skipped = {}
+            if self._setup.running():
+                # Only one spotify-headless may use the client's config folder at a time.
+                self._st.last_error = "The Spotify client setup is running. Finish it before starting the splitter."
+                return False
             if not cfg.speakers:
                 self._st.last_error = "No speakers configured. Add one in Settings."
                 return False
 
-            # The audio format. The built-in receiver and librespot deliver 44.1 kHz;
-            # Soloist plays on the Windows default output, so we capture that and the
-            # pipeline runs at the capture's rate.
+            # The audio format. The Spotify client (headless) delivers 44.1 kHz; Soloist
+            # plays on the Windows default output, so we capture that and the pipeline
+            # runs at the capture's rate.
             rate = SAMPLE_RATE
             capture = None
             if cfg.receiver == "soloist":
@@ -161,29 +166,19 @@ class Engine:
                 r.stream.start()
 
             try:
-                if cfg.receiver == "builtin":
-                    from .builtin import BuiltinSource
-
-                    source = BuiltinSource(cfg, fan, self._receiver_state_path())
-                elif cfg.receiver == "soloist":
+                if cfg.receiver == "soloist":
                     from .soloist import SoloistSource
 
                     source = SoloistSource(cfg, fan, self._base_dir(), capture)
-                else:
-                    source = LibrespotSource(build_command(cfg), on_audio=fan.write)
+                else:  # "headless": parse_config only lets the two official clients through
+                    from .headless import HeadlessSource
+
+                    source = HeadlessSource(cfg, fan, self._base_dir())
                 source.start()
-            except Exception as exc:  # missing executable, port in use, missing package ...
+            except Exception as exc:  # missing executable or key, expired build ...
                 for r in runtimes:
                     r.stream.close()
-                if cfg.receiver == "builtin":
-                    message = f"Could not start the Spotify Connect receiver: {exc}"
-                elif cfg.receiver == "soloist":
-                    message = str(exc)
-                else:
-                    message = (
-                        f"Could not start librespot ({cfg.librespot_path}): {exc}. "
-                        "Install it or set librespot_path in Advanced settings."
-                    )
+                message = str(exc)
                 self._st = _State(last_error=message)
                 log.error("%s", message)
                 return False
@@ -226,11 +221,33 @@ class Engine:
         """Folder of the config file; where keys, data and tools are looked for."""
         return self._config_path.resolve().parent if self._config_path else Path.cwd()
 
-    def _receiver_state_path(self) -> Path | None:
-        """Where the built-in receiver keeps its device id and saved login."""
-        if self._config_path is None:
-            return None
-        return self._config_path.with_name(".spconnect-state.json")
+    # ----- Spotify client setup (receiver "headless") -------------------------
+
+    def setup_status(self) -> dict:
+        return self._setup.status(self._cfg, self._base_dir())
+
+    def setup_start(self) -> None:
+        """Start the one-time sign-in session (the client with a loopback VNC server)."""
+        from .headless import HeadlessError
+
+        with self._lock:
+            if self._st.source is not None:
+                raise ValueError("Stop the splitter first, then start the Spotify client setup.")
+            cfg, base_dir = self._cfg, self._base_dir()
+        # Not under the engine lock: starting takes a couple of seconds and the
+        # status poll must not wait for it.
+        try:
+            self._setup.start(cfg, base_dir)
+        except HeadlessError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def setup_stop(self) -> None:
+        self._setup.stop()
+
+    def close(self) -> None:
+        """Stop everything this engine runs (streaming and the setup session)."""
+        self.stop()
+        self.setup_stop()
 
     def control(self, action: str) -> None:
         """Transport control from the web UI: play, pause, next or prev."""
@@ -388,5 +405,5 @@ def run_engine_with_web(cfg: AppConfig, config_path: str | Path, web: bool = Tru
         log.info("stopping")
     finally:
         stop.set()
-        engine.stop()
+        engine.close()
     return 0
