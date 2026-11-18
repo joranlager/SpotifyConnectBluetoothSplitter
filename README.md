@@ -26,19 +26,40 @@ Spotify app ──Connect──> official Spotify client ──sound──> FanO
 
 ## Requirements
 
-- Windows 10/11 (the code is cross-platform, but speaker matching is tuned for WASAPI)
-- Python 3.10+
-- A Spotify **Premium** account
-- Bluetooth speakers already **paired and connected** in Windows Settings
+- Python 3.10+ and a Spotify **Premium** account
+- A web browser (any current one; the web UI needs nothing installed)
+- **Windows 10/11 with Soloist** (`receiver: "soloist"`): your Bluetooth speakers
+  paired and connected in Windows Settings
+- **or Linux x86_64 with the official Spotify desktop client**
+  (`receiver: "headless"`): Spotify, `xvfb`, `pulseaudio-utils` (`pactl`,
+  `parec`), `x11vnc` (first sign-in only) and Rust (`cargo`) to build the tool
+  in `headless/`. See [the Linux section](#official-spotify-client-on-linux-spotify-headless).
 
 ## Setup
 
-```bash
+Windows (PowerShell):
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy config.example.json config.json
 ```
+
+Linux:
+
+```bash
+sudo apt install libportaudio2          # sounddevice needs PortAudio
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp config.example.json config.json
+```
+
+`config.json` is yours (git ignores it). Set `receiver` in it to `soloist` or
+`headless`, or change it later under *Advanced* in the web UI. Then do the
+receiver's own setup: [Using Soloist](#using-soloist) or
+[the Linux section](#official-spotify-client-on-linux-spotify-headless).
 
 ## Using Soloist
 
@@ -179,26 +200,102 @@ outputs on Linux are also untested: this app picks Bluetooth speakers through
 PortAudio devices, which on Linux exposes ALSA devices and not each Bluetooth
 speaker separately.
 
-## Run
+## Run: the backend and the web UI
 
-```bash
-python -m splitter run --config config.json
-```
+The backend and the web UI are **one program**. `python -m splitter run` starts
+the backend (the engine that receives the sound and copies it to your speakers,
+plus a small web server), and that server hands the web UI to your browser. You
+do not start the UI separately and there is nothing to build for it. With the
+`headless` receiver the backend also starts and stops the Rust tool and the
+Spotify client by itself.
 
-Then:
+1. Finish the receiver's setup (the Soloist key and `soloist.exe`, or the built
+   `headless` tool and an installed Spotify client).
+2. Start it from the repository folder, with the virtual environment active:
 
-1. Open **http://localhost:8080** and add your speakers from *Available devices*.
-2. Press **Start**. The first time, Windows Firewall may ask whether Soloist may
-   accept connections: allow it on private networks, or Spotify cannot find the
-   device.
-3. In Spotify (phone or PC, on the same network), open the device picker and
+   ```bash
+   python -m splitter run --config config.json
+   ```
+
+   The log shows `web UI at http://localhost:8080` when it is ready. Leave this
+   terminal open: closing it stops the splitter.
+3. Open **http://localhost:8080** in a browser. Open it by that address, not by
+   double-clicking `index.html`: the page needs the backend.
+4. On the **Speakers** tab, add your speakers from *Available devices*. With
+   the `headless` receiver, do the one-time sign-in on the **Spotify client**
+   tab first.
+5. Press **Start** in the header (or set `autostart` to start streaming as soon
+   as the app launches). The first time, Windows Firewall may ask whether
+   Soloist may accept connections: allow it on private networks, or Spotify
+   cannot find the device.
+6. In Spotify (phone or PC, on the same network), open the device picker and
    choose **Bluetooth Splitter** (with the `headless` receiver: this computer's
    host name).
+7. Stop with **Ctrl+C** in the terminal. The backend stops the receiver, and
+   with `headless` also the virtual display and its audio sink.
 
+Options of `run`:
 
-Options: `--host 0.0.0.0` and `--port 8080` override the web settings,
-`--no-web` runs without the web UI, and `--name` overrides `device_name`.
-`python -m splitter list` prints the audio outputs Windows reports.
+| Option | Meaning |
+| --- | --- |
+| `-c`, `--config FILE` | Config file (default `config.json`) |
+| `--host ADDRESS` | Web address to listen on (overrides `web_host`) |
+| `--port PORT` | Web port (overrides `web_port`, default 8080) |
+| `--name NAME` | Device name (overrides `device_name`) |
+| `--no-web` | Run the backend without the web server; it streams if `autostart` is on |
+
+`python -m splitter -v run` logs in more detail, and `python -m splitter list`
+prints the audio outputs the app can see.
+
+### Reaching the web UI from another computer
+
+By default the server listens on `127.0.0.1`, so only the machine it runs on can
+open it. For a board you reach over the network, keep that default and tunnel
+the port from your own computer:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 you@board
+```
+
+then open **http://localhost:8080** there. Alternatively set `web_host` (or
+`--host`) to `0.0.0.0` to let other devices open it directly. There is no login,
+so only do that on a network you trust.
+
+### Running it at boot on Linux (untested)
+
+A systemd *user* service for the backend; adjust the paths:
+
+```ini
+# ~/.config/systemd/user/splitter.service
+[Unit]
+Description=Bluetooth splitter (backend and web UI)
+After=pipewire.service pipewire-pulse.service network-online.target
+
+[Service]
+WorkingDirectory=%h/SpotifyConnectBluetoothSplitter
+ExecStart=%h/SpotifyConnectBluetoothSplitter/.venv/bin/python -m splitter run --config config.json
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now splitter
+loginctl enable-linger "$USER"      # keep the user session (and audio) alive without a login
+```
+
+### If it does not start
+
+- `config file not found`: copy `config.example.json` to `config.json`.
+- `invalid config: ...`: the message names the setting; a config that still says
+  `builtin` or `librespot` must be changed to `soloist` or `headless`.
+- Port 8080 is in use: pass `--port 8081` (and open that port instead).
+- The page says "Can't reach the splitter": the backend is not running, or you
+  opened a different address or port than the one in its log.
+- The banner on the page shows why streaming did not start (missing Soloist
+  key, missing tool, no speaker connected, ...).
 
 ## Web UI
 
