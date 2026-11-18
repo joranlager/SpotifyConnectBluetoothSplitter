@@ -1,7 +1,10 @@
 """Local web server: serves the single-page UI and a small JSON API.
 
+The UI is a single-page app: this server only serves its files and a JSON API.
+
 Endpoints
-    GET   /                  the web UI
+    GET   /                  the app shell (index.html); the views are routed in the browser (#/...)
+    GET   /static/...        the app's ES modules and CSS (whitelisted types only)
     GET   /api/status        live state and per-speaker monitoring
     GET   /api/outputs       audio output devices visible to Windows
     GET   /api/config        current configuration
@@ -23,19 +26,62 @@ from __future__ import annotations
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 from .config import config_to_dict, parse_config
 
 log = logging.getLogger(__name__)
 
-UI_PATH = Path(__file__).parent / "web" / "index.html"
+WEB_ROOT = Path(__file__).parent / "web"
+INDEX_PATH = WEB_ROOT / "index.html"
+STATIC_ROOT = WEB_ROOT / "static"
 MAX_BODY = 64 * 1024
 MAX_DRAIN = 8 * 1024 * 1024  # larger refused bodies are not read, only refused
+
+# The UI is a single-page app: index.html plus ES modules and CSS under /static/.
+# Only these file types are ever served from there.
+CONTENT_TYPES = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+
+# Everything the page needs comes from this server: no inline scripts, no other
+# origins, and it may not be framed.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
 
 
 class _BadRequest(Exception):
     pass
+
+
+def resolve_static(url_path: str) -> tuple[Path, str] | None:
+    """Map a /static/... URL path to (file, content type), or None.
+
+    Only whitelisted file types inside STATIC_ROOT are served; anything that
+    resolves outside it (.., absolute paths, symlinks) is refused.
+    """
+    prefix = "/static/"
+    if not url_path.startswith(prefix):
+        return None
+    rel = unquote(url_path[len(prefix):])
+    if not rel or "\x00" in rel or "\\" in rel:
+        return None
+    content_type = CONTENT_TYPES.get(PurePosixPath(rel).suffix.lower())
+    if content_type is None:
+        return None
+    root = STATIC_ROOT.resolve()
+    target = (root / rel).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        return None
+    return target, content_type
 
 
 def make_handler(engine) -> type[BaseHTTPRequestHandler]:
@@ -53,8 +99,18 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_file(self, path: Path, content_type: str) -> None:
+            try:
+                body = path.read_bytes()
+            except OSError:
+                return self._error(500, "UI file missing")
+            self._send(200, body, content_type)
 
         def _json(self, code: int, payload) -> None:
             self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
@@ -120,11 +176,12 @@ def make_handler(engine) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
-                try:
-                    body = UI_PATH.read_bytes()
-                except OSError:
-                    return self._error(500, "UI file missing")
-                return self._send(200, body, "text/html; charset=utf-8")
+                return self._send_file(INDEX_PATH, "text/html; charset=utf-8")
+            if path.startswith("/static/"):
+                found = resolve_static(path)
+                if found is None:
+                    return self._error(404, "not found")
+                return self._send_file(*found)
             if path == "/api/status":
                 return self._dispatch(lambda: self._json(200, engine.status()))
             if path == "/api/outputs":
