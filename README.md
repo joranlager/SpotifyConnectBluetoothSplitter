@@ -202,22 +202,32 @@ Options: `--host 0.0.0.0` and `--port 8080` override the web settings,
 
 ## Web UI
 
-- **Control**: start, stop or restart the device.
-- **Monitor**: whether sound is playing, throughput history, and per
-  speaker latency, buffer level and underruns.
-- **Speakers**: per-speaker volume, mute and delay, all live (nothing restarts,
-  so Spotify keeps playing). The delay has -10/-1/+1/+10 ms buttons and an
-  editable field. Press **Sync test** to play a click every second on every
-  speaker for 10 seconds. Add speakers from the detected devices list, or remove them.
-- **Settings**: device name, buffer, speaker alignment, autostart and
-  advanced options (the receiver and its paths). With the `headless` receiver
-  there is also the **Spotify client setup** card for the one-time sign-in. Changes are saved to `config.json`; the stream restarts if
-  it is running.
+The web UI is a single-page app. The Python backend serves one page and a JSON
+API; the app itself runs in the browser and switches between its views without
+reloading, using the URL hash, so every view can be bookmarked and reloaded:
 
-The UI is one file served by the app, with no external dependencies. The web
-server listens on `127.0.0.1` by default, so only this PC can reach it. Setting
-`web_host` to `0.0.0.0` lets other devices on your network control it. There is
-no login, so do that only on a trusted network.
+- **Dashboard** (`#/`): the state of the splitter, throughput history and how
+  many speakers are connected.
+- **Speakers** (`#/speakers`): per-speaker volume, mute and delay, all live
+  (nothing restarts, so Spotify keeps playing). The delay has -10/-1/+1/+10 ms
+  buttons and an editable field. Press **Sync test** to play a click every
+  second on every speaker for 10 seconds. Add speakers from the detected devices
+  list, or remove them.
+- **Settings** (`#/settings`): device name, buffer, speaker alignment,
+  autostart and advanced options (the receiver and its paths). Changes are
+  saved to `config.json`; the stream restarts if it is running. Leaving the view
+  with unsaved changes asks first.
+- **Spotify client** (`#/setup`, only with the `headless` receiver): checks what
+  is installed and runs the one-time sign-in.
+
+The header (state, Start/Stop, Restart) and the error banner stay on every view.
+
+The server listens on `127.0.0.1` by default, so only this PC can reach it.
+Setting `web_host` to `0.0.0.0` lets other devices on your network control it.
+There is no login, so do that only on a trusted network. The page is served with
+a strict Content-Security-Policy (scripts and styles only from this server, no
+framing) and the API refuses state-changing requests that are not JSON, so other
+websites cannot drive it.
 
 ### API
 
@@ -309,8 +319,6 @@ earlier versions (`bitrate`, `librespot_*`, `cache_dir`) are ignored.
   does not expose exact timing. Expect a small echo on some speaker pairs.
 - **Speaker drop-outs** on Bluetooth are not auto-reconnected; press Restart
   after reconnecting a speaker.
-- The transport controls and now-playing display in the web UI are not used by
-  the two official clients (they show nothing).
 
 ## Development
 
@@ -323,5 +331,12 @@ The tests need no Spotify account, network or speakers. They cover the config,
 the Soloist and spotify-headless sources (with stand-in programs), the engine,
 the fan-out, the sync test and the web API.
 
-- The web UI is a single file, `splitter/web/index.html` (plain HTML, CSS and
-  JS, no build step). The server reads it on each page load.
+- The web UI is plain HTML, CSS and ES modules, with **no build step and no
+  dependencies**: `splitter/web/index.html` is the shell and
+  `splitter/web/static/` holds the app. `app.js` is the entry (header, tabs,
+  polling), `router.js` the hash router, `store.js` the shared state,
+  `actions.js` every call to the backend, and `views/` has one module per view
+  (`mount`, `update`, `unmount`). Files are read on each request, so edit and
+  reload. Only `.js`, `.css`, `.svg`, `.png`, `.ico` and `.woff2` files are
+  served from `static/`, and the Content-Security-Policy forbids inline scripts
+  and `style=""` attributes (a test checks the views for the latter).

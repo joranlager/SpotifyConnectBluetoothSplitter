@@ -518,7 +518,10 @@ def test_setup_rejects_bad_requests(server):
 
 def test_the_ui_offers_the_setup(server):
     base, _ = server
-    with urllib.request.urlopen(base + "/", timeout=5) as resp:
-        html = resp.read().decode()
-    for needle in ('data-v="headless"', 'id="setupSection"', "/api/setup", "headless_vnc_port"):
-        assert needle in html
+    parts = []
+    for path in ("/static/views/setup.js", "/static/views/settings.js", "/static/actions.js"):
+        with urllib.request.urlopen(base + path, timeout=5) as resp:
+            parts.append(resp.read().decode())
+    source = "".join(parts)
+    for needle in ('data-v="headless"', "setupBtn", "/api/setup", "headless_vnc_port"):
+        assert needle in source
